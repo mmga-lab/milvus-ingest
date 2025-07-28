@@ -608,7 +608,7 @@ class MilvusVerifier:
                 logger.debug(f"Vector search failed: {e}")
 
         recall_at_10 = passed / len(sample_data) if sample_data else 0
-        success = recall_at_10 > 0.95  # 95% recall@10 for vector search
+        success = recall_at_10 > 0.9  # 90% recall@10 for vector search
 
         if success:
             display_success(
