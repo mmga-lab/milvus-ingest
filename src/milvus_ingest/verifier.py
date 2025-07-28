@@ -74,16 +74,31 @@ class MilvusVerifier:
             "\n[bold]🔍 Running scalar field verification with query tests...[/bold]"
         )
 
+        # Check AUTO_ID compatibility
+        if not self._check_auto_id_compatibility("scalar"):
+            return {
+                "row_count": False,
+                "scalar_fields": False,
+                "query_correctness": False,
+            }
+
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. Scalar field comparison
-        results["scalar_fields"] = self._verify_scalar_field_values(sample_size)
+        # 2. Calculate optimal sample size
+        total_rows = self.generation_info.get("total_rows", 0)
+        optimal_sample_size = self._calculate_sample_size(total_rows)
+        self.console.print(
+            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+        )
 
-        # 3. Query/search correctness with 1000 samples
+        # 3. Scalar field comparison
+        results["scalar_fields"] = self._verify_scalar_field_values(optimal_sample_size)
+
+        # 4. Query/search correctness with 1000 samples
         results["query_correctness"] = self._verify_query_correctness(1000)
 
         self._display_summary(results)
@@ -99,16 +114,27 @@ class MilvusVerifier:
             "\n[bold]🔍 Running full field verification with query tests...[/bold]"
         )
 
+        # Check AUTO_ID compatibility
+        if not self._check_auto_id_compatibility("full"):
+            return {"row_count": False, "all_fields": False, "query_correctness": False}
+
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. All field comparison (including vectors)
-        results["all_fields"] = self._verify_all_field_values(sample_size)
+        # 2. Calculate optimal sample size
+        total_rows = self.generation_info.get("total_rows", 0)
+        optimal_sample_size = self._calculate_sample_size(total_rows)
+        self.console.print(
+            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+        )
 
-        # 3. Query/search correctness with 1000 samples
+        # 3. All field comparison (including vectors)
+        results["all_fields"] = self._verify_all_field_values(optimal_sample_size)
+
+        # 4. Query/search correctness with 1000 samples
         results["query_correctness"] = self._verify_query_correctness(1000)
 
         self._display_summary(results)
@@ -120,14 +146,25 @@ class MilvusVerifier:
 
         self.console.print("\n[bold]🔍 Running scalar field verification...[/bold]")
 
+        # Check AUTO_ID compatibility
+        if not self._check_auto_id_compatibility("scalar"):
+            return {"row_count": False, "scalar_fields": False}
+
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. Scalar field comparison
-        results["scalar_fields"] = self._verify_scalar_field_values(sample_size)
+        # 2. Calculate optimal sample size
+        total_rows = self.generation_info.get("total_rows", 0)
+        optimal_sample_size = self._calculate_sample_size(total_rows)
+        self.console.print(
+            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+        )
+
+        # 3. Scalar field comparison
+        results["scalar_fields"] = self._verify_scalar_field_values(optimal_sample_size)
 
         self._display_summary(results)
         return results
@@ -140,16 +177,27 @@ class MilvusVerifier:
             "\n[bold]🔍 Running full field verification with query tests...[/bold]"
         )
 
+        # Check AUTO_ID compatibility
+        if not self._check_auto_id_compatibility("full"):
+            return {"row_count": False, "all_fields": False, "query_correctness": False}
+
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. All field comparison (including vectors)
-        results["all_fields"] = self._verify_all_field_values(sample_size)
+        # 2. Calculate optimal sample size
+        total_rows = self.generation_info.get("total_rows", 0)
+        optimal_sample_size = self._calculate_sample_size(total_rows)
+        self.console.print(
+            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+        )
 
-        # 3. Query/search correctness with 1000 samples
+        # 3. All field comparison (including vectors)
+        results["all_fields"] = self._verify_all_field_values(optimal_sample_size)
+
+        # 4. Query/search correctness with 1000 samples
         results["query_correctness"] = self._verify_query_correctness(1000)
 
         self._display_summary(results)
@@ -549,7 +597,6 @@ class MilvusVerifier:
 
         return success
 
-
     def _test_vector_search(
         self, vector_field: dict[str, Any], sample_size: int
     ) -> bool:
@@ -601,7 +648,7 @@ class MilvusVerifier:
                         if result.entity.get(pk_field) == query_pk:
                             found_self = True
                             break
-                
+
                 if found_self:
                     passed += 1
             except Exception as e:
@@ -807,21 +854,89 @@ class MilvusVerifier:
             return False
 
     def _load_sample_source_data(self, sample_size: int) -> list[dict[str, Any]]:
-        """Load sample data from source parquet files."""
+        """Load sample data from source files (parquet or json)."""
         try:
+            # Try parquet files first
             parquet_files = list(self.data_path.glob("*.parquet"))
-            if not parquet_files:
-                return []
+            if parquet_files:
+                df = pd.read_parquet(parquet_files[0])
+                sample_data = df.head(sample_size).to_dict(orient="records")
+                return sample_data
 
-            # Load from first file
-            df = pd.read_parquet(parquet_files[0])
-            sample_data = df.head(sample_size).to_dict(orient="records")
-            return sample_data
+            # Fallback to JSON files (exclude meta.json)
+            json_files = [
+                f for f in self.data_path.glob("*.json") if f.name != "meta.json"
+            ]
+            if json_files:
+                return self._read_json_sample(json_files[0], sample_size)
+
+            return []
 
         except Exception as e:
             logger.debug(f"Failed to load source data: {e}")
             return []
 
+    def _read_json_sample(
+        self, json_path: Path, sample_size: int
+    ) -> list[dict[str, Any]]:
+        """Read sample data from JSON file."""
+        import json
+
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                content = f.read().strip()
+
+            data_list = []
+            if content.startswith("["):
+                # JSON array format (list of dict) - Milvus bulk import format
+                data_list = json.loads(content)
+            elif content.startswith("{"):
+                # Check if it's legacy format with "rows" key or single object
+                data = json.loads(content)
+                if "rows" in data and isinstance(data["rows"], list):
+                    # Legacy Milvus bulk import format: {"rows": [...]}
+                    data_list = data["rows"]
+                else:
+                    # Single object - wrap in list
+                    data_list = [data]
+            else:
+                # Try line-delimited JSON
+                lines = content.strip().split("\n")
+                data_list = [json.loads(line) for line in lines if line.strip()]
+
+            # Return sample
+            return data_list[:sample_size]
+
+        except Exception as e:
+            logger.debug(f"Failed to read JSON file {json_path}: {e}")
+            return []
+
+    def _calculate_sample_size(self, total_rows: int) -> int:
+        """Calculate optimal sample size: 10% of total rows, max 1M records."""
+        if total_rows <= 0:
+            return 1000  # Default fallback
+
+        # 10% sampling ratio with 1M max limit
+        sample_size = min(int(total_rows * 0.1), 1_000_000)
+        # Ensure minimum of 1000 samples for statistical significance
+        return max(sample_size, 1000)
+
+    def _check_auto_id_compatibility(self, verification_level: str) -> bool:
+        """Check if verification level is compatible with AUTO_ID fields."""
+        if verification_level not in ["scalar", "full"]:
+            return True
+
+        # Check if there are AUTO_ID fields in the schema
+        for field in self.schema.get("fields", []):
+            if field.get("auto_id", False):
+                display_error(
+                    f"❌ {verification_level.capitalize()} verification is not supported with AUTO_ID fields.\n"
+                    f"   AUTO_ID field '{field['name']}' prevents data alignment between source and Milvus.\n"
+                    f"   Please use 'count' level verification instead."
+                )
+                return False
+
+        return True
 
     def _display_summary(self, results: dict[str, bool]) -> None:
         """Display verification summary."""
