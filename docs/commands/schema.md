@@ -221,7 +221,7 @@ milvus-ingest schema add test_schema ./test.json
 milvus-ingest schema show test_schema
 
 # 测试使用
-milvus-ingest generate --builtin test_schema --rows 10 --preview
+milvus-ingest generate --builtin test_schema --total-rows 10 --preview
 ```
 
 ### 模式文件格式
@@ -419,10 +419,10 @@ milvus-ingest schema add my_custom my_schema.json \
 milvus-ingest schema show my_custom
 
 # 测试生成数据
-milvus-ingest generate --builtin my_custom --rows 10 --preview
+milvus-ingest generate --builtin my_custom --total-rows 10 --preview
 
 # 生成实际数据
-milvus-ingest generate --builtin my_custom --rows 10000 --out ./my_data
+milvus-ingest generate --builtin my_custom --total-rows 10000 --out ./my_data
 ```
 
 ### 4. 管理模式库
@@ -480,8 +480,8 @@ milvus-ingest schema add products_v2 schema_v2.json
 2. 添加模式: schema add  
 3. 查看结构: schema show
 4. 预览数据: generate --preview
-5. 小规模测试: generate --rows 1000
-6. 正式使用: generate --rows 100000
+5. 小规模测试: generate --total-rows 1000
+6. 正式使用: generate --total-rows 100000
 ```
 
 ## 相关命令

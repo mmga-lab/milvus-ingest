@@ -57,7 +57,7 @@ milvus-ingest 支持两种数据格式：
 ### 生成JSON数据
 ```bash
 # 生成简单JSON数据
-milvus-ingest generate --builtin simple --rows 1000 --format json --out json_data
+milvus-ingest generate --builtin simple --total-rows 1000 --format json --out json_data
 
 # 查看生成的文件结构
 ls json_data/
@@ -283,7 +283,7 @@ EOF
 # 生成带动态字段的JSON数据
 milvus-ingest generate \
   --schema ecommerce_dynamic.json \
-  --rows 5000 \
+  --total-rows 5000 \
   --format json \
   --out dynamic_ecommerce
 
@@ -302,7 +302,7 @@ with open('dynamic_ecommerce/data.json', 'r') as f:
 # 使用内置的动态字段示例
 milvus-ingest generate \
   --builtin dynamic_example \
-  --rows 1000 \
+  --total-rows 1000 \
   --format json \
   --out cms_content
 
@@ -320,14 +320,14 @@ milvus-ingest to-milvus insert ./cms_content \
 # 生成Parquet格式（高性能）
 milvus-ingest generate \
   --builtin dynamic_example \
-  --rows 100000 \
+  --total-rows 100000 \
   --format parquet \
   --out large_dataset_parquet
 
 # 生成JSON格式（便于调试）
 milvus-ingest generate \
   --builtin dynamic_example \
-  --rows 1000 \
+  --total-rows 1000 \
   --format json \
   --out sample_dataset_json
 
@@ -344,13 +344,13 @@ milvus-ingest to-milvus insert ./sample_dataset_json \
 ### 1. 格式选择指导
 ```bash
 # 大规模数据生成（>10万行）→ 使用Parquet
-milvus-ingest generate --builtin simple --rows 1000000 --format parquet
+milvus-ingest generate --builtin simple --total-rows 1000000 --format parquet
 
 # 小规模调试和验证 → 使用JSON
-milvus-ingest generate --builtin simple --rows 1000 --format json --preview
+milvus-ingest generate --builtin simple --total-rows 1000 --format json --preview
 
 # 动态字段调试 → 推荐JSON格式
-milvus-ingest generate --builtin dynamic_example --rows 100 --format json
+milvus-ingest generate --builtin dynamic_example --total-rows 100 --format json
 ```
 
 ### 2. 动态字段设计原则
@@ -364,17 +364,17 @@ milvus-ingest generate --builtin dynamic_example --rows 100 --format json
 # 大数据集使用大批次
 milvus-ingest generate \
   --builtin dynamic_example \
-  --rows 1000000 \
+  --total-rows 1000000 \
   --format json \
   --batch-size 50000
 
 # 合理设置文件分割
 milvus-ingest generate \
   --builtin dynamic_example \
-  --rows 5000000 \
+  --total-rows 5000000 \
   --format json \
-  --max-file-size 256 \
-  --max-rows-per-file 500000
+  --file-size 256MB \
+  --rows-per-file 500000
 ```
 
 ### 4. 数据验证
@@ -383,7 +383,7 @@ milvus-ingest generate \
 milvus-ingest generate --schema my_schema.json --validate-only
 
 # 小规模预览
-milvus-ingest generate --builtin dynamic_example --rows 10 --format json --preview
+milvus-ingest generate --builtin dynamic_example --total-rows 10 --format json --preview
 
 # 检查动态字段内容
 python3 -c "
@@ -427,7 +427,7 @@ python3 -c "import json; json.load(open('data.json'))"  # 验证JSON有效性
 
 # 问题: 文件过大
 # 解决: 启用文件分割
---max-file-size 256 --max-rows-per-file 500000
+--file-size 256MB --rows-per-file 500000
 ```
 
 ## 📖 相关命令参考

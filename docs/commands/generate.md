@@ -15,10 +15,10 @@ milvus-ingest generate [OPTIONS]
 
 ```bash
 # 使用内置模式
-milvus-ingest generate --builtin simple --rows 1000
+milvus-ingest generate --builtin simple --total-rows 1000
 
 # 使用自定义管理模式  
-milvus-ingest generate --builtin my_products --rows 1000
+milvus-ingest generate --builtin my_products --total-rows 1000
 ```
 
 **可用的内置模式:**
@@ -40,24 +40,24 @@ milvus-ingest generate --builtin my_products --rows 1000
 使用自定义模式文件 (JSON/YAML)
 
 ```bash
-milvus-ingest generate --schema my_schema.json --rows 1000
-milvus-ingest generate --schema my_schema.yaml --rows 1000
+milvus-ingest generate --schema my_schema.json --total-rows 1000
+milvus-ingest generate --schema my_schema.yaml --total-rows 1000
 ```
 
 ## 基本选项
 
-### --rows INTEGER
-设置生成的数据行数 (必需)
+### --total-rows INTEGER
+设置生成的数据行数 (默认: 1000)
 
 ```bash
 # 小规模测试
-milvus-ingest generate --builtin simple --rows 1000
+milvus-ingest generate --builtin simple --total-rows 1000
 
 # 中等规模
-milvus-ingest generate --builtin ecommerce --rows 100000
+milvus-ingest generate --builtin ecommerce --total-rows 100000
 
 # 大规模数据集
-milvus-ingest generate --builtin ecommerce --rows 5000000
+milvus-ingest generate --builtin ecommerce --total-rows 5000000
 ```
 
 ### --out DIRECTORY  
@@ -65,10 +65,10 @@ milvus-ingest generate --builtin ecommerce --rows 5000000
 
 ```bash
 # 自定义输出目录
-milvus-ingest generate --builtin ecommerce --rows 10000 --out ./my_data
+milvus-ingest generate --builtin ecommerce --total-rows 10000 --out ./my_data
 
 # 强制覆盖已存在目录
-milvus-ingest generate --builtin simple --rows 1000 --out ./data --force
+milvus-ingest generate --builtin simple --total-rows 1000 --out ./data --force
 ```
 
 ### --format {parquet,json}
@@ -76,13 +76,13 @@ milvus-ingest generate --builtin simple --rows 1000 --out ./data --force
 
 ```bash
 # Parquet 格式 (推荐，最快的I/O性能)
-milvus-ingest generate --builtin simple --rows 10000 --format parquet
+milvus-ingest generate --builtin simple --total-rows 10000 --format parquet
 
 # JSON 格式 (标准数组格式 [{}...], 便于调试和与Milvus bulk import兼容)
-milvus-ingest generate --builtin simple --rows 10000 --format json
+milvus-ingest generate --builtin simple --total-rows 10000 --format json
 
 # 动态字段示例 (推荐JSON格式便于查看$meta字段内容)
-milvus-ingest generate --builtin dynamic_example --rows 1000 --format json
+milvus-ingest generate --builtin dynamic_example --total-rows 1000 --format json
 ```
 
 ## 预览和验证选项
@@ -92,10 +92,10 @@ milvus-ingest generate --builtin dynamic_example --rows 1000 --format json
 
 ```bash
 # 快速预览数据结构
-milvus-ingest generate --builtin ecommerce --rows 100000 --preview
+milvus-ingest generate --builtin ecommerce --total-rows 100000 --preview
 
 # 验证自定义模式
-milvus-ingest generate --schema my_schema.json --rows 1000 --preview
+milvus-ingest generate --schema my_schema.json --total-rows 1000 --preview
 ```
 
 ### --validate-only
@@ -116,13 +116,13 @@ milvus-ingest generate --schema my_schema.json --validate-only
 
 ```bash
 # 小内存环境
-milvus-ingest generate --builtin simple --rows 100000 --batch-size 10000
+milvus-ingest generate --builtin simple --total-rows 100000 --batch-size 10000
 
 # 高性能环境 (推荐)
-milvus-ingest generate --builtin ecommerce --rows 1000000 --batch-size 100000
+milvus-ingest generate --builtin ecommerce --total-rows 1000000 --batch-size 100000
 
 # 极大数据集
-milvus-ingest generate --builtin ecommerce --rows 10000000 --batch-size 200000
+milvus-ingest generate --builtin ecommerce --total-rows 10000000 --batch-size 200000
 ```
 
 **批处理大小选择指南:**
@@ -131,26 +131,70 @@ milvus-ingest generate --builtin ecommerce --rows 10000000 --batch-size 200000
 - **大型数据集** (100K-1M 行): 50000-100000  
 - **超大数据集** (>1M 行): 100000-200000
 
-### --max-file-size INTEGER
-设置单文件最大大小 (MB, 默认: 256)
+### --file-size TEXT
+设置文件大小限制 (支持单位如 '10GB', '256MB', 默认: 256MB)
 
 ```bash
 # 较小的文件便于处理
-milvus-ingest generate --builtin ecommerce --rows 1000000 --max-file-size 128
+milvus-ingest generate --builtin ecommerce --total-rows 1000000 --file-size 128MB
 
 # 较大的文件减少文件数量
-milvus-ingest generate --builtin ecommerce --rows 5000000 --max-file-size 512
+milvus-ingest generate --builtin ecommerce --total-rows 5000000 --file-size 512MB
 ```
 
-### --max-rows-per-file INTEGER  
+### --rows-per-file INTEGER  
 设置单文件最大行数 (默认: 1000000)
 
 ```bash
 # 更小的文件分片
-milvus-ingest generate --builtin ecommerce --rows 5000000 --max-rows-per-file 500000
+milvus-ingest generate --builtin ecommerce --total-rows 5000000 --rows-per-file 500000
 
 # 更大的文件分片
-milvus-ingest generate --builtin ecommerce --rows 10000000 --max-rows-per-file 2000000
+milvus-ingest generate --builtin ecommerce --total-rows 10000000 --rows-per-file 2000000
+```
+
+### --file-count INTEGER
+目标文件数量 (与 --file-size 一起使用时，会覆盖 --total-rows)
+
+```bash
+# 生成10个1GB的文件
+milvus-ingest generate --builtin ecommerce --file-count 10 --file-size 1GB
+
+# 生成100个200MB的文件进行测试
+milvus-ingest generate --builtin documents --file-count 100 --file-size 200MB
+```
+
+### --partitions INTEGER
+设置 Milvus 分区数量 (需要模式中有分区键字段)
+
+```bash
+# 8个分区的数据集
+milvus-ingest generate --builtin ecommerce_partitioned --total-rows 1000000 --partitions 8
+
+# 大规模分区测试
+milvus-ingest generate --builtin ecommerce_partitioned --total-rows 10000000 --partitions 1024
+```
+
+### --shards INTEGER
+设置分片数量 (VChannels)，基于主键哈希分布数据
+
+```bash
+# 4个分片的数据集
+milvus-ingest generate --builtin simple --total-rows 1000000 --shards 4
+
+# 分区与分片组合
+milvus-ingest generate --builtin ecommerce_partitioned --total-rows 5000000 --partitions 8 --shards 16
+```
+
+### --workers INTEGER
+并行工作进程数 (默认: CPU核心数)
+
+```bash
+# 使用8个并行进程加速生成
+milvus-ingest generate --builtin ecommerce --total-rows 10000000 --workers 8
+
+# 限制资源使用
+milvus-ingest generate --builtin documents --total-rows 5000000 --workers 2
 ```
 
 ## 其他选项
@@ -160,10 +204,10 @@ milvus-ingest generate --builtin ecommerce --rows 10000000 --max-rows-per-file 2
 
 ```bash
 # 可重现的数据生成
-milvus-ingest generate --builtin simple --rows 10000 --seed 42
+milvus-ingest generate --builtin simple --total-rows 10000 --seed 42
 
 # 每次运行生成相同数据
-milvus-ingest generate --builtin ecommerce --rows 100000 --seed 123 --out ./reproducible_data
+milvus-ingest generate --builtin ecommerce --total-rows 100000 --seed 123 --out ./reproducible_data
 ```
 
 ### --no-progress
@@ -171,7 +215,7 @@ milvus-ingest generate --builtin ecommerce --rows 100000 --seed 123 --out ./repr
 
 ```bash
 # 在脚本中使用，避免输出干扰
-milvus-ingest generate --builtin simple --rows 100000 --no-progress
+milvus-ingest generate --builtin simple --total-rows 100000 --no-progress
 ```
 
 
@@ -180,7 +224,7 @@ milvus-ingest generate --builtin simple --rows 100000 --no-progress
 
 ```bash
 # 强制覆盖已存在的目录
-milvus-ingest generate --builtin simple --rows 10000 --out ./existing_dir --force
+milvus-ingest generate --builtin simple --total-rows 10000 --out ./existing_dir --force
 ```
 
 ## 完整示例
@@ -189,10 +233,10 @@ milvus-ingest generate --builtin simple --rows 10000 --out ./existing_dir --forc
 
 ```bash
 # 基础预览
-milvus-ingest generate --builtin simple --rows 1000 --preview
+milvus-ingest generate --builtin simple --total-rows 1000 --preview
 
 # 小规模测试数据
-milvus-ingest generate --builtin ecommerce --rows 10000 --out ./test_data
+milvus-ingest generate --builtin ecommerce --total-rows 10000 --out ./test_data
 ```
 
 ### 2. 高性能大规模生成
@@ -201,10 +245,10 @@ milvus-ingest generate --builtin ecommerce --rows 10000 --out ./test_data
 # 生成100万行电商数据，优化性能设置
 milvus-ingest generate \
   --builtin ecommerce \
-  --rows 1000000 \
+  --total-rows 1000000 \
   --batch-size 100000 \
-  --max-file-size 256 \
-  --max-rows-per-file 500000 \
+  --file-size 256MB \
+  --rows-per-file 500000 \
   --out ./big_ecommerce_data \
   --seed 42
 ```
@@ -218,7 +262,7 @@ milvus-ingest generate --schema ./schemas/my_products.json --validate-only
 # 生成自定义数据
 milvus-ingest generate \
   --schema ./schemas/my_products.json \
-  --rows 50000 \
+  --total-rows 50000 \
   --format parquet \
   --out ./custom_products \
   --preview
@@ -231,7 +275,7 @@ milvus-ingest generate \
 for schema in simple ecommerce documents users; do
   milvus-ingest generate \
     --builtin $schema \
-    --rows 100000 \
+    --total-rows 100000 \
     --out ./datasets/$schema \
     --seed 42
 done
@@ -259,7 +303,7 @@ done
 
 3. **启用文件分割**
    ```bash
-   --max-file-size 256 --max-rows-per-file 1000000  # 便于处理
+   --file-size 256MB --rows-per-file 1000000  # 便于处理
    ```
 
 4. **使用随机种子**
@@ -294,7 +338,7 @@ output_directory/
 1. **内存不足错误**
    ```bash
    # 解决: 减少批处理大小
-   --batch-size 10000 --max-rows-per-file 100000
+   --batch-size 10000 --rows-per-file 100000
    ```
 
 2. **模式验证失败**

@@ -76,19 +76,22 @@ pdm publish       # Publish to PyPI (requires PDM_PUBLISH_TOKEN)
 pdm install
 
 # High-performance data generation commands (optimized for large-scale datasets)
-milvus-ingest generate --builtin simple --total-rows 100000 --preview        # Generate 100K rows
+milvus-ingest generate --builtin simple --total-rows 100000 --preview        # Generate 100K rows (formerly --rows)
 milvus-ingest generate --schema example_schema.json --total-rows 1000000     # Generate 1M rows
 milvus-ingest generate --schema schema.json --total-rows 5000000 --batch-size 100000 # Use large batch size
 
 # Advanced file control options (for pipeline testing scenarios)
-milvus-ingest generate --schema schema.json --total-rows 1000000 --file-size 256MB   # Set specific file size
+milvus-ingest generate --schema schema.json --total-rows 1000000 --file-size 256MB   # Set specific file size (formerly --max-file-size)
 milvus-ingest generate --schema schema.json --file-count 10 --file-size 10GB         # Generate 10×10GB files
 milvus-ingest generate --schema schema.json --file-count 500 --file-size 200MB       # Generate 500×200MB files
-milvus-ingest generate --schema schema.json --total-rows 1000000 --rows-per-file 500000 # Set max rows per file
+milvus-ingest generate --schema schema.json --total-rows 1000000 --rows-per-file 500000 # Set max rows per file (formerly --max-rows-per-file)
 
 # Partition and shard configuration (for distributed testing)
 milvus-ingest generate --schema schema.json --total-rows 1000000 --partitions 8 --shards 4  # Multi-partition setup
 milvus-ingest generate --schema schema.json --total-rows 5000000 --partitions 1024 --shards 16  # Max partitions/shards
+
+# Worker configuration for parallel processing
+milvus-ingest generate --schema schema.json --total-rows 10000000 --workers 8  # Use 8 parallel workers
 
 # Additional generation options
 milvus-ingest generate --schema schema.json --validate-only            # Validate schema without generating
@@ -236,13 +239,15 @@ The verification system provides three progressive levels of data validation:
   - Exact queries: 95% success rate threshold
   - Vector searches: 80% success rate threshold (accounts for approximate search nature)
 
-### Parameter Naming Convention
+### Parameter Naming Convention (Updated)
 The CLI uses consistent parameter naming after recent updates:
 - `--total-rows` (not `--rows`) - Total number of rows to generate
 - `--file-size` (not `--max-file-size`) - File size limit (supports units like "10GB", "256MB")
 - `--rows-per-file` (not `--max-rows-per-file`) - Maximum rows per file
 - `--partitions` - Number of Milvus partitions (requires partition key field in schema)
 - `--shards` - Number of Milvus shards/VChannels (distributes data based on primary key hash)
+- `--workers` - Number of parallel worker processes for file generation (default: CPU count)
+- `--file-count` - Target number of files (when used with --file-size, calculates total rows automatically)
 
 ### File Size Control Logic
 The system handles parameter conflicts intelligently:
@@ -325,6 +330,119 @@ Generated data includes a `meta.json` file with:
 3. Build package: `make build`
 4. Test installation: `pip install dist/*.whl`
 5. Publish: `PDM_PUBLISH_TOKEN=<token> make publish`
+
+## Complete CLI Command Reference
+
+### Data Generation (`generate` command)
+```bash
+milvus-ingest generate [OPTIONS]
+
+Options:
+  --schema PATH                Path to schema JSON/YAML file
+  --builtin TEXT              Use a built-in schema (e.g., 'ecommerce', 'documents')
+  --total-rows INTEGER        Total number of rows to generate (default: 1000)
+  --format {parquet|json}     Output file format (default: parquet)
+  --preview                   Print first 5 rows to terminal after generation
+  --out PATH                  Output directory path (default: <collection_name>/)
+  --seed INTEGER              Random seed for reproducibility
+  --validate-only             Only validate schema without generating data
+  --no-progress               Disable progress bar display
+  --batch-size INTEGER        Batch size for processing (default: 50000)
+  --force                     Force overwrite output directory if it exists
+  --file-size TEXT            File size limit (e.g., '10GB', '256MB', default: 256MB)
+  --rows-per-file INTEGER     Maximum rows per file (default: 1000000)
+  --file-count INTEGER        Target number of files (overrides --total-rows when used with --file-size)
+  --partitions INTEGER        Number of Milvus partitions to simulate
+  --shards INTEGER            Number of shards (VChannels) to simulate
+  --workers INTEGER           Number of parallel worker processes (default: CPU count)
+  -v, --verbose               Enable verbose logging
+```
+
+### Schema Management (`schema` commands)
+```bash
+milvus-ingest schema list              # List all available schemas
+milvus-ingest schema show SCHEMA_ID    # Show details of a specific schema
+milvus-ingest schema add SCHEMA_ID FILE # Add a custom schema
+milvus-ingest schema remove SCHEMA_ID  # Remove a custom schema
+milvus-ingest schema help              # Show schema format help
+```
+
+### Data Upload (`upload` command)
+```bash
+milvus-ingest upload [OPTIONS]
+
+Required Options:
+  --local-path PATH           Local path to data directory to upload
+  --s3-path TEXT              S3 destination path (e.g., s3://bucket/prefix/)
+
+Optional Options:
+  --endpoint-url TEXT         S3-compatible endpoint URL (e.g., http://localhost:9000)
+  --access-key-id TEXT        AWS access key ID (or use AWS_ACCESS_KEY_ID env var)
+  --secret-access-key TEXT    AWS secret access key (or use AWS_SECRET_ACCESS_KEY env var)
+  --region TEXT               AWS region name (default: us-east-1)
+  --no-verify-ssl             Disable SSL certificate verification
+  --no-progress               Disable progress bar during upload
+```
+
+### Milvus Operations (`to-milvus` commands)
+
+#### Direct Insert
+```bash
+milvus-ingest to-milvus insert DATA_PATH [OPTIONS]
+
+Options:
+  --uri TEXT                  Milvus server URI (default: http://localhost:19530)
+  --token TEXT                Token for authentication
+  --db-name TEXT              Database name (default: default)
+  --collection-name TEXT      Override collection name from metadata
+  --drop-if-exists            Drop collection if it already exists
+  --no-index                  Skip creating indexes on vector fields
+  --batch-size INTEGER        Batch size for inserting (default: 10000)
+  --no-progress               Disable progress bar
+```
+
+#### Bulk Import (Upload + Import)
+```bash
+milvus-ingest to-milvus import [OPTIONS]
+
+Required Options:
+  --local-path PATH           Local data directory path
+  --s3-path TEXT              S3 path (relative to bucket)
+  --bucket TEXT               S3/MinIO bucket name
+
+Optional Options:
+  --collection-name TEXT      Target collection name (overrides metadata)
+  --endpoint-url TEXT         S3/MinIO endpoint URL
+  --access-key-id TEXT        S3/MinIO access key ID
+  --secret-access-key TEXT    S3/MinIO secret access key
+  --no-verify-ssl             Disable SSL verification
+  --uri TEXT                  Milvus URI (default: http://127.0.0.1:19530)
+  --token TEXT                Authentication token
+  --wait                      Wait for import to complete
+  --timeout INTEGER           Timeout in seconds when waiting
+  --drop-if-exists            Drop collection if exists before creating
+```
+
+#### Data Verification
+```bash
+milvus-ingest to-milvus verify DATA_PATH [OPTIONS]
+
+Options:
+  --collection-name TEXT      Collection name to verify
+  --uri TEXT                  Milvus server URI (default: http://localhost:19530)
+  --token TEXT                Token for authentication
+  --db-name TEXT              Database name (default: default)
+  --level {count|scalar|full} Verification level (default: count)
+                              - count: Row count + query tests
+                              - scalar: Scalar fields + query tests
+                              - full: All fields + query tests
+```
+
+### Utility Commands
+```bash
+milvus-ingest clean [OPTIONS]          # Clean up generated output files
+  --yes, -y                            # Auto-confirm all prompts
+```
 
 ## Performance Benchmarking
 

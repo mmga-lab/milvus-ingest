@@ -177,7 +177,7 @@ EOF
 milvus-ingest generate --schema schemas/knowledge_base.json --validate-only
 
 # 预览数据结构
-milvus-ingest generate --schema schemas/knowledge_base.json --rows 10 --preview
+milvus-ingest generate --schema schemas/knowledge_base.json --total-rows 10 --preview
 
 # 查看详细字段信息
 milvus-ingest schema help --field-type Array
@@ -204,7 +204,7 @@ milvus-ingest schema show knowledge_base
 # 生成小样本数据进行验证
 milvus-ingest generate \
   --builtin knowledge_base \
-  --rows 1000 \
+  --total-rows 1000 \
   --out data/kb_sample \
   --seed 42
 
@@ -318,7 +318,7 @@ python scripts/validate_data.py data/kb_sample
 # 生成中等规模数据进行性能测试
 milvus-ingest generate \
   --builtin knowledge_base \
-  --rows 50000 \
+  --total-rows 50000 \
   --batch-size 10000 \
   --out data/kb_medium \
   --seed 42
@@ -515,10 +515,10 @@ python scripts/verify_import.py $MILVUS_URI knowledge_base_staging 50000
 # 生成大规模数据集用于性能测试
 milvus-ingest generate \
   --builtin knowledge_base \
-  --rows 1000000 \
+  --total-rows 1000000 \
   --batch-size 50000 \
-  --max-file-size 256 \
-  --max-rows-per-file 500000 \
+  --file-size 256MB \
+  --rows-per-file 500000 \
   --out data/kb_large \
   --seed 42
 
@@ -1019,7 +1019,7 @@ log_info "开始增量数据更新..."
 # 生成新的数据（模拟增量）
 milvus-ingest generate \
     --builtin knowledge_base \
-    --rows 100000 \
+    --total-rows 100000 \
     --out data/kb_incremental_$(date +%Y%m%d) \
     --seed $(date +%s)
 

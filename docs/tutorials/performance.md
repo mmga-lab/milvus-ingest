@@ -66,8 +66,8 @@ vectors = np.random.random((batch_size, dim)).astype(np.float32)
 
 ```bash
 # 启用文件分割防止内存溢出
---max-file-size 256        # 256MB 每文件
---max-rows-per-file 1000000 # 100万行每文件
+--file-size 256MB        # 256MB 每文件
+--rows-per-file 1000000 # 100万行每文件
 ```
 
 ### 4. 并行 I/O (Parallel I/O)
@@ -104,7 +104,7 @@ for batch_size in "${batch_sizes[@]}"; do
     
     milvus-ingest generate \
         --builtin $schema \
-        --rows $rows \
+        --total-rows $rows \
         --batch-size $batch_size \
         --out ./test_batch_${batch_size} \
         --no-progress > /dev/null 2>&1
@@ -145,26 +145,26 @@ milvus-ingest generate --batch-size 100000
 # 针对不同用途优化文件大小
 
 # 快速本地测试 - 小文件
---max-file-size 64 --max-rows-per-file 100000
+--file-size 64MB --rows-per-file 100000
 
 # 平衡性能 - 中等文件  
---max-file-size 256 --max-rows-per-file 500000
+--file-size 256MB --rows-per-file 500000
 
 # 最大吞吐量 - 大文件
---max-file-size 512 --max-rows-per-file 1000000
+--file-size 512MB --rows-per-file 1000000
 ```
 
 #### 基于下游处理的分割
 
 ```bash
 # Milvus 直接插入 - 较小文件便于处理
---max-file-size 128 --max-rows-per-file 250000
+--file-size 128MB --rows-per-file 250000
 
 # S3 批量导入 - 较大文件减少文件数
---max-file-size 512 --max-rows-per-file 1000000
+--file-size 512MB --rows-per-file 1000000
 
 # 分布式处理 - 平衡文件大小
---max-file-size 256 --max-rows-per-file 500000
+--file-size 256MB --rows-per-file 500000
 ```
 
 ## 📊 不同场景的优化策略
@@ -177,10 +177,10 @@ milvus-ingest generate --batch-size 100000
 # 高吞吐量配置
 milvus-ingest generate \
     --builtin simple \
-    --rows 5000000 \
+    --total-rows 5000000 \
     --batch-size 200000 \
-    --max-file-size 1024 \
-    --max-rows-per-file 2000000 \
+    --file-size 1024MB \
+    --rows-per-file 2000000 \
     --format parquet \
     --no-progress \
     --out ./high_throughput_data
@@ -200,10 +200,10 @@ milvus-ingest generate \
 # 内存优化配置
 milvus-ingest generate \
     --builtin ecommerce \
-    --rows 10000000 \
+    --total-rows 10000000 \
     --batch-size 25000 \
-    --max-file-size 128 \
-    --max-rows-per-file 200000 \
+    --file-size 128MB \
+    --rows-per-file 200000 \
     --format parquet \
     --out ./memory_optimized_data
 ```
@@ -222,9 +222,9 @@ milvus-ingest generate \
 # 存储优化配置
 milvus-ingest generate \
     --builtin documents \
-    --rows 2000000 \
+    --total-rows 2000000 \
     --batch-size 50000 \
-    --max-file-size 512 \
+    --file-size 512MB \
     --format parquet \
     --out ./storage_optimized_data
 ```
@@ -254,7 +254,7 @@ milvus-ingest generate \
 # 第一轮：基础配置测试
 time milvus-ingest generate \
     --builtin ecommerce \
-    --rows 100000 \
+    --total-rows 100000 \
     --out ./test_baseline
 
 # 结果：100K行用时45秒，预计1000万行需要75分钟
@@ -262,7 +262,7 @@ time milvus-ingest generate \
 # 第二轮：增加批处理大小
 time milvus-ingest generate \
     --builtin ecommerce \
-    --rows 100000 \
+    --total-rows 100000 \
     --batch-size 100000 \
     --out ./test_batch_optimized
 
@@ -271,10 +271,10 @@ time milvus-ingest generate \
 # 第三轮：优化文件分割
 time milvus-ingest generate \
     --builtin ecommerce \
-    --rows 100000 \
+    --total-rows 100000 \
     --batch-size 100000 \
-    --max-file-size 512 \
-    --max-rows-per-file 1000000 \
+    --file-size 512MB \
+    --rows-per-file 1000000 \
     --out ./test_file_optimized
 
 # 结果：100K行用时25秒，预计1000万行需要42分钟
@@ -282,10 +282,10 @@ time milvus-ingest generate \
 # 最终生产配置
 time milvus-ingest generate \
     --builtin ecommerce \
-    --rows 10000000 \
+    --total-rows 10000000 \
     --batch-size 150000 \
-    --max-file-size 512 \
-    --max-rows-per-file 1000000 \
+    --file-size 512MB \
+    --rows-per-file 1000000 \
     --format parquet \
     --no-progress \
     --out ./ecommerce_10m_final
@@ -320,10 +320,10 @@ monitor_pid=$!
 # 内存优化配置
 milvus-ingest generate \
     --builtin documents \
-    --rows 5000000 \
+    --total-rows 5000000 \
     --batch-size 15000 \
-    --max-file-size 64 \
-    --max-rows-per-file 100000 \
+    --file-size 64MB \
+    --rows-per-file 100000 \
     --format parquet \
     --out ./documents_memory_optimized
 
@@ -428,7 +428,7 @@ monitor_pid=$!
 # 运行数据生成
 milvus-ingest generate \
     --builtin ecommerce \
-    --rows 1000000 \
+    --total-rows 1000000 \
     --batch-size 50000 \
     --out ./monitored_generation
 
@@ -563,7 +563,7 @@ generate_parallel() {
         local start_seed=$((42 + i * 1000))
         milvus-ingest generate \
             --builtin ecommerce \
-            --rows $rows_per_job \
+            --total-rows $rows_per_job \
             --seed $start_seed \
             --out ./parallel_job_$i \
             --batch-size 50000 &

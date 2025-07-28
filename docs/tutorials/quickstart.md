@@ -28,7 +28,7 @@ milvus-ingest --help
 
 ```bash
 # 生成简单测试数据并预览
-milvus-ingest generate --builtin simple --rows 1000 --preview
+milvus-ingest generate --builtin simple --total-rows 1000 --preview
 ```
 
 输出示例：
@@ -57,7 +57,7 @@ Collection: simple_collection
 
 ```bash
 # 生成1万行数据
-milvus-ingest generate --builtin simple --rows 10000 --out ./my_first_dataset
+milvus-ingest generate --builtin simple --total-rows 10000 --out ./my_first_dataset
 ```
 
 输出：
@@ -111,7 +111,7 @@ milvus-ingest schema show ecommerce
 
 ```bash
 # 生成电商测试数据
-milvus-ingest generate --builtin ecommerce --rows 5000 --out ./ecommerce_data
+milvus-ingest generate --builtin ecommerce --total-rows 5000 --out ./ecommerce_data
 ```
 
 这会生成包含产品信息、价格、评分、多个向量字段的真实电商数据。
@@ -219,10 +219,10 @@ EOF
 milvus-ingest generate --schema my_products.json --validate-only
 
 # 预览数据
-milvus-ingest generate --schema my_products.json --rows 100 --preview
+milvus-ingest generate --schema my_products.json --total-rows 100 --preview
 
 # 生成数据集
-milvus-ingest generate --schema my_products.json --rows 10000 --out ./my_products_data
+milvus-ingest generate --schema my_products.json --total-rows 10000 --out ./my_products_data
 ```
 
 ## 📊 第六步：性能测试
@@ -230,19 +230,19 @@ milvus-ingest generate --schema my_products.json --rows 10000 --out ./my_product
 ### 小规模测试
 ```bash
 # 1万行数据 - 几秒内完成
-time milvus-ingest generate --builtin ecommerce --rows 10000 --out ./small_test
+time milvus-ingest generate --builtin ecommerce --total-rows 10000 --out ./small_test
 ```
 
 ### 中等规模测试
 ```bash
 # 10万行数据 - 约30秒
-time milvus-ingest generate --builtin ecommerce --rows 100000 --out ./medium_test
+time milvus-ingest generate --builtin ecommerce --total-rows 100000 --out ./medium_test
 ```
 
 ### 大规模测试（可选）
 ```bash
 # 100万行数据 - 约5分钟
-time milvus-ingest generate --builtin ecommerce --rows 1000000 --out ./large_test
+time milvus-ingest generate --builtin ecommerce --total-rows 1000000 --out ./large_test
 ```
 
 ## 🔄 第七步：连接到 Milvus（可选）
@@ -310,10 +310,10 @@ milvus-ingest clean --yes      # 确认清理
 ### 最常用命令
 ```bash
 # 快速预览
-milvus-ingest generate --builtin simple --rows 1000 --preview
+milvus-ingest generate --builtin simple --total-rows 1000 --preview
 
 # 生成测试数据  
-milvus-ingest generate --builtin <schema> --rows <count> --out <dir>
+milvus-ingest generate --builtin <schema> --total-rows <count> --out <dir>
 
 # 查看所有模式
 milvus-ingest schema list

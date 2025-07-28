@@ -27,16 +27,16 @@
 
 ```bash
 # 快速生成数据预览
-milvus-ingest generate --builtin simple --rows 1000 --preview
+milvus-ingest generate --builtin simple --total-rows 1000 --preview
 
 # 生成大规模数据集（Parquet格式）
-milvus-ingest generate --builtin ecommerce --rows 1000000 --out ./data
+milvus-ingest generate --builtin ecommerce --total-rows 1000000 --out ./data
 
 # 生成JSON格式数据（便于调试）
-milvus-ingest generate --builtin simple --rows 10000 --format json --out ./json_data
+milvus-ingest generate --builtin simple --total-rows 10000 --format json --out ./json_data
 
 # 生成带动态字段的数据
-milvus-ingest generate --builtin dynamic_example --rows 5000 --format json --out ./dynamic_data
+milvus-ingest generate --builtin dynamic_example --total-rows 5000 --format json --out ./dynamic_data
 
 # 查看所有可用模式
 milvus-ingest schema list
@@ -65,7 +65,7 @@ milvus-ingest <COMMAND> [OPTIONS]
 使用预定义的数据模式，适合快速开始和测试：
 
 ```bash
-milvus-ingest generate --builtin simple --rows 10000
+milvus-ingest generate --builtin simple --total-rows 10000
 ```
 
 **可用的内置模式：**
@@ -83,7 +83,7 @@ milvus-ingest generate --builtin simple --rows 10000
 使用 JSON/YAML 文件定义自己的数据结构：
 
 ```bash
-milvus-ingest generate --schema my_schema.json --rows 10000
+milvus-ingest generate --schema my_schema.json --total-rows 10000
 ```
 
 ### 3. 模式管理
@@ -94,14 +94,14 @@ milvus-ingest generate --schema my_schema.json --rows 10000
 milvus-ingest schema add my_products schema.json
 
 # 像内置模式一样使用
-milvus-ingest generate --builtin my_products --rows 10000
+milvus-ingest generate --builtin my_products --total-rows 10000
 ```
 
 ## 🔧 高级功能
 
 ### 性能优化
 - **大批量处理**: `--batch-size 100000` (默认: 50000)
-- **文件分割**: `--max-file-size 256` (MB), `--max-rows-per-file 1000000`
+- **文件分割**: `--file-size 256MB`, `--rows-per-file 1000000`
 - **格式选择**: `--format parquet` (最快) 或 `json` (标准数组格式)
 - **动态字段**: 支持Milvus动态字段，使用 `$meta` 字段存储
 
@@ -115,8 +115,8 @@ milvus-ingest generate --builtin my_products --rows 10000
 | 场景 | 推荐命令 | 说明 |
 |------|----------|------|
 | 快速测试 | `generate --builtin simple --preview` | 预览数据结构 |
-| 原型开发 | `generate --builtin <type> --rows 10000` | 小规模真实数据 |
-| 性能测试 | `generate --builtin <type> --rows 1000000 --batch-size 100000` | 大规模数据生成 |
+| 原型开发 | `generate --builtin <type> --total-rows 10000` | 小规模真实数据 |
+| 性能测试 | `generate --builtin <type> --total-rows 1000000 --batch-size 100000` | 大规模数据生成 |
 | 生产部署 | 完整工作流 (生成→上传→导入) | 参见[完整工作流教程](tutorials/complete-workflow.md) |
 
 ## 📋 支持的数据类型

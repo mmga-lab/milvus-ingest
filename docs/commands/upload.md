@@ -139,7 +139,7 @@ milvus-ingest upload ./data s3://bucket/data/ \
 
 ```bash
 # 生成数据
-milvus-ingest generate --builtin ecommerce --rows 100000 --out ./ecommerce_data
+milvus-ingest generate --builtin ecommerce --total-rows 100000 --out ./ecommerce_data
 
 # 上传到 AWS S3（使用默认凭证）
 milvus-ingest upload ./ecommerce_data s3://my-production-bucket/datasets/ecommerce/
@@ -156,7 +156,7 @@ milvus-ingest upload ./ecommerce_data s3://my-production-bucket/datasets/ecommer
 
 ```bash
 # 生成测试数据
-milvus-ingest generate --builtin simple --rows 10000 --out ./test_data
+milvus-ingest generate --builtin simple --total-rows 10000 --out ./test_data
 
 # 上传到本地 MinIO
 milvus-ingest upload ./test_data s3://test-bucket/simple-data/ \
@@ -178,7 +178,7 @@ milvus-ingest upload ./test_data s3://production-bucket/datasets/ \
 # 生成多个数据集
 schemas=("simple" "ecommerce" "documents" "users")
 for schema in "${schemas[@]}"; do
-  milvus-ingest generate --builtin $schema --rows 50000 --out ./${schema}_data
+  milvus-ingest generate --builtin $schema --total-rows 50000 --out ./${schema}_data
 done
 
 # 批量上传
@@ -336,7 +336,7 @@ chmod 755 ./data/
 milvus-ingest generate --format parquet
 
 # 控制文件大小便于传输
-milvus-ingest generate --max-file-size 256  # 256MB 每文件
+milvus-ingest generate --file-size 256MB  # 256MB 每文件
 ```
 
 ### 3. 并发优化
@@ -347,7 +347,7 @@ milvus-ingest generate --max-file-size 256  # 256MB 每文件
 ### 1. 完整数据管道
 ```bash
 # 步骤1: 生成数据
-milvus-ingest generate --builtin ecommerce --rows 1000000 --out ./ecommerce
+milvus-ingest generate --builtin ecommerce --total-rows 1000000 --out ./ecommerce
 
 # 步骤2: 上传数据
 milvus-ingest upload ./ecommerce s3://milvus-data/ecommerce/ \
@@ -372,7 +372,7 @@ for schema in "${SCHEMAS[@]}"; do
     echo "处理 $schema..."
     
     # 生成数据
-    milvus-ingest generate --builtin $schema --rows 100000 --out ./${schema}_data
+    milvus-ingest generate --builtin $schema --total-rows 100000 --out ./${schema}_data
     
     # 上传数据
     milvus-ingest upload ./${schema}_data ${BUCKET}/${schema}/ \

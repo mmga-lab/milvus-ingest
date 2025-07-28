@@ -104,10 +104,10 @@ milvus-ingest to-milvus insert ./data --batch-size 5000
 #### 1. 基础本地插入
 ```bash
 # 生成Parquet格式数据
-milvus-ingest generate --builtin simple --rows 10000 --out ./simple_data
+milvus-ingest generate --builtin simple --total-rows 10000 --out ./simple_data
 
 # 生成JSON格式数据
-milvus-ingest generate --builtin simple --rows 10000 --format json --out ./simple_json
+milvus-ingest generate --builtin simple --total-rows 10000 --format json --out ./simple_json
 
 # 插入到本地 Milvus (自动检测文件格式)
 milvus-ingest to-milvus insert ./simple_data
@@ -271,10 +271,10 @@ milvus-ingest to-milvus import \
 #### 1. 一步式导入（推荐）
 ```bash
 # 生成Parquet格式数据（默认）
-milvus-ingest generate --builtin ecommerce --rows 1000000 --out ./ecommerce
+milvus-ingest generate --builtin ecommerce --total-rows 1000000 --out ./ecommerce
 
 # 生成JSON格式数据（与Milvus bulk import兼容）
-milvus-ingest generate --builtin ecommerce --rows 1000000 --format json --out ./ecommerce_json
+milvus-ingest generate --builtin ecommerce --total-rows 1000000 --format json --out ./ecommerce_json
 
 # 自动上传并导入（支持两种格式）
 milvus-ingest to-milvus import \
@@ -290,7 +290,7 @@ milvus-ingest to-milvus import \
 #### 2. 分步式导入
 ```bash
 # 步骤1: 生成数据
-milvus-ingest generate --builtin documents --rows 2000000 --out ./documents
+milvus-ingest generate --builtin documents --total-rows 2000000 --out ./documents
 
 # 步骤2: 上传数据
 milvus-ingest upload ./documents s3://milvus-data/documents/ \
@@ -311,9 +311,9 @@ milvus-ingest to-milvus import \
 # 生成大规模数据集
 milvus-ingest generate \
   --builtin ecommerce \
-  --rows 10000000 \
-  --max-file-size 512 \
-  --max-rows-per-file 1000000 \
+  --total-rows 10000000 \
+  --file-size 512MB \
+  --rows-per-file 1000000 \
   --out ./big_ecommerce
 
 # 高性能导入
@@ -496,9 +496,9 @@ curl http://localhost:19530/healthz
 # 使用合适的文件分割
 milvus-ingest generate \
   --builtin ecommerce \
-  --rows 5000000 \
-  --max-file-size 256 \
-  --max-rows-per-file 500000
+  --total-rows 5000000 \
+  --file-size 256MB \
+  --rows-per-file 500000
 ```
 
 ### 2. 性能优化

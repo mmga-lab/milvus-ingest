@@ -39,16 +39,16 @@
 
 ```bash
 # 电商推荐系统
-milvus-ingest generate --builtin ecommerce --rows 100000 --out ./ecommerce_demo
+milvus-ingest generate --builtin ecommerce --total-rows 100000 --out ./ecommerce_demo
 
 # 文档搜索系统
-milvus-ingest generate --builtin documents --rows 50000 --out ./docs_demo
+milvus-ingest generate --builtin documents --total-rows 50000 --out ./docs_demo
 
 # 多媒体应用
-milvus-ingest generate --builtin images --rows 30000 --out ./media_demo
+milvus-ingest generate --builtin images --total-rows 30000 --out ./media_demo
 
 # AI 对话系统
-milvus-ingest generate --builtin ai_conversations --rows 20000 --out ./ai_demo
+milvus-ingest generate --builtin ai_conversations --total-rows 20000 --out ./ai_demo
 ```
 
 ### 使用示例Schema

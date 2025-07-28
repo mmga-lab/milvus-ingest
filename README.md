@@ -52,10 +52,10 @@ Get started instantly with pre-built schemas optimized for large-scale generatio
 milvus-ingest schema list
 
 # Generate data using a built-in schema (high-performance by default)
-milvus-ingest generate --builtin simple --rows 100000 --preview
+milvus-ingest generate --builtin simple --total-rows 100000 --preview
 
 # Generate large e-commerce dataset with automatic file partitioning
-milvus-ingest generate --builtin ecommerce --rows 2500000 --out products/
+milvus-ingest generate --builtin ecommerce --total-rows 2500000 --out products/
 
 # Import to Milvus and verify data integrity
 milvus-ingest to-milvus insert ./products/ --uri http://localhost:19530
@@ -107,7 +107,7 @@ Define your own collection structure with JSON or YAML:
 
 ```bash
 # Generate large dataset from custom schema with high-performance mode
-milvus-ingest generate --schema my_schema.json --rows 1000000 --format parquet --preview
+milvus-ingest generate --schema my_schema.json --total-rows 1000000 --format parquet --preview
 ```
 
 **Note:** Output is always a directory containing data files (in the specified format) and a `meta.json` file with collection metadata.
@@ -124,7 +124,7 @@ milvus-ingest schema add my_products product_schema.json
 milvus-ingest schema list
 
 # Use your custom schema like a built-in one (optimized for large datasets)
-milvus-ingest generate --builtin my_products --rows 500000
+milvus-ingest generate --builtin my_products --total-rows 500000
 
 # Show detailed schema information
 milvus-ingest schema show my_products
@@ -285,7 +285,7 @@ milvus-ingest clean [options]     # Utility commands
 |---------|-------------|---------|
 | `--schema PATH` | Generate from custom schema file | `milvus-ingest generate --schema my_schema.json` |
 | `--builtin SCHEMA_ID` | Use built-in or managed schema | `milvus-ingest generate --builtin ecommerce` |
-| `--rows INTEGER` | Number of rows to generate | `milvus-ingest generate --rows 5000` |
+| `--total-rows INTEGER` | Total number of rows to generate | `milvus-ingest generate --total-rows 5000` |
 | `--format FORMAT` | Output format (parquet, json) | `milvus-ingest generate --format json` |
 | `--out DIRECTORY` | Output directory path | `milvus-ingest generate --out my_data/` |
 | `--preview` | Show first 5 rows | `milvus-ingest generate --preview` |
@@ -293,8 +293,12 @@ milvus-ingest clean [options]     # Utility commands
 | `--validate-only` | Validate schema without generating | `milvus-ingest generate --validate-only` |
 | `--no-progress` | Disable progress bar display | `milvus-ingest generate --no-progress` |
 | `--batch-size INTEGER` | Batch size for memory efficiency (default: 50000) | `milvus-ingest generate --batch-size 100000` |
-| `--max-file-size INTEGER` | Maximum size per file in MB (default: 256) | `milvus-ingest generate --max-file-size 100` |
-| `--max-rows-per-file INTEGER` | Maximum rows per file (default: 1000000) | `milvus-ingest generate --max-rows-per-file 500000` |
+| `--file-size TEXT` | File size limit (e.g., '10GB', '256MB', default: 256MB) | `milvus-ingest generate --file-size 100MB` |
+| `--rows-per-file INTEGER` | Maximum rows per file (default: 1000000) | `milvus-ingest generate --rows-per-file 500000` |
+| `--file-count INTEGER` | Target number of files (overrides --total-rows when used with --file-size) | `milvus-ingest generate --file-count 10 --file-size 1GB` |
+| `--partitions INTEGER` | Number of Milvus partitions to simulate | `milvus-ingest generate --partitions 8` |
+| `--shards INTEGER` | Number of shards (VChannels) to simulate | `milvus-ingest generate --shards 4` |
+| `--workers INTEGER` | Number of parallel worker processes (default: CPU count) | `milvus-ingest generate --workers 8` |
 | `--force` | Force overwrite output directory | `milvus-ingest generate --force` |
 
 ### Schema Management Commands
@@ -318,19 +322,19 @@ milvus-ingest clean [options]     # Utility commands
 
 ```bash
 # Quick start with built-in schema (high-performance by default)
-milvus-ingest generate --builtin simple --rows 100000 --preview
+milvus-ingest generate --builtin simple --total-rows 100000 --preview
 
 # Generate massive datasets with automatic file partitioning 
-milvus-ingest generate --builtin ecommerce --rows 5000000 --format parquet --out products/
+milvus-ingest generate --builtin ecommerce --total-rows 5000000 --format parquet --out products/
 
 # Test custom schema validation
 milvus-ingest generate --schema my_schema.json --validate-only
 
 # Reproducible large-scale data generation
-milvus-ingest generate --builtin users --rows 2000000 --seed 42 --out users/
+milvus-ingest generate --builtin users --total-rows 2000000 --seed 42 --out users/
 
 # Control file partitioning (smaller files for easier handling)
-milvus-ingest generate --builtin ecommerce --rows 5000000 --max-file-size 128 --max-rows-per-file 500000
+milvus-ingest generate --builtin ecommerce --total-rows 5000000 --file-size 128MB --rows-per-file 500000
 
 # Schema management workflow
 milvus-ingest schema list
@@ -349,7 +353,7 @@ Insert generated data directly into Milvus with automatic collection creation:
 
 ```bash
 # Generate data first
-milvus-ingest generate --builtin ecommerce --rows 100000 --out products/
+milvus-ingest generate --builtin ecommerce --total-rows 100000 --out products/
 
 # Insert to local Milvus (default: localhost:19530)
 milvus-ingest to-milvus insert ./products/

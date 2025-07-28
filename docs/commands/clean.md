@@ -203,7 +203,7 @@ function run_experiment() {
     echo "开始实验: $schema"
     
     # 生成数据
-    milvus-ingest generate --builtin $schema --rows $rows --out ./exp_${schema}
+    milvus-ingest generate --builtin $schema --total-rows $rows --out ./exp_${schema}
     
     # 测试导入
     milvus-ingest to-milvus insert ./exp_${schema} --collection-name test_${schema}
