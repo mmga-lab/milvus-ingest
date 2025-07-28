@@ -1,12 +1,11 @@
 {
-  "collection_name": "default_values_demo",
+  "collection_name": "default_values",
   "enable_dynamic_field": false,
   "fields": [
     {
       "name": "id",
       "type": "Int64",
-      "is_primary": true,
-      "auto_id": true
+      "is_primary": true
     },
     {
       "name": "title",

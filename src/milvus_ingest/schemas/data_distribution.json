@@ -1,12 +1,11 @@
 {
-  "collection_name": "cardinality_demo",
+  "collection_name": "data_distribution",
   "description": "Demonstration of different data distribution patterns for scalar fields",
   "fields": [
     {
       "name": "id",
       "type": "Int64",
       "is_primary": true,
-      "auto_id": true,
       "description": "Unique identifier"
     },
     {

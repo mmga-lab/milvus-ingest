@@ -4,11 +4,11 @@ Usage::
 
     # Data generation
     milvus-ingest generate --schema schema.json --rows 1000
-    milvus-ingest generate --builtin simple --rows 100 --preview
+    milvus-ingest generate --builtin quickstart --rows 100 --preview
 
     # Schema management
     milvus-ingest schema list
-    milvus-ingest schema show simple
+    milvus-ingest schema show quickstart
     milvus-ingest schema add my_schema schema.json
 
     # Utilities

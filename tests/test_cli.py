@@ -89,7 +89,7 @@ class TestDataGeneration:
     @pytest.mark.parametrize(
         "schema_name,expected_rows",
         [
-            ("simple", 50),
+            ("quickstart", 50),
             ("ecommerce", 25),
         ],
     )
@@ -118,7 +118,7 @@ class TestDataGeneration:
             # Verify output directory structure  
             # Different schemas have different collection name patterns
             collection_map = {
-                "simple": "simple_example",
+                "quickstart": "quickstart_example",
                 "ecommerce": "ecommerce_products"
             }
             collection_name = collection_map.get(schema_name, f"{schema_name}_example")
@@ -335,10 +335,10 @@ class TestSchemaManagement:
 
         assert result.exit_code == 0
         # Should list built-in schemas
-        assert "simple" in result.output
+        assert "quickstart" in result.output
         assert "ecommerce" in result.output
 
-    @pytest.mark.parametrize("schema_name", ["simple", "ecommerce"])
+    @pytest.mark.parametrize("schema_name", ["quickstart", "ecommerce"])
     def test_schema_show(self, runner, schema_name):
         """Test showing schema details."""
         result = runner.invoke(main, ["schema", "show", schema_name])

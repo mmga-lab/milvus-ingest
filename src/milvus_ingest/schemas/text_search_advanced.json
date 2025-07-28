@@ -1,13 +1,12 @@
 {
-  "collection_name": "bm25_demo_collection",
+  "collection_name": "text_search_advanced",
   "description": "Comprehensive BM25 function demonstration with multiple text fields and hybrid search capabilities",
   "fields": [
     {
       "name": "doc_id",
       "type": "Int64",
       "is_primary": true,
-      "auto_id": true,
-      "description": "Auto-generated document ID"
+      "description": "Document identifier"
     },
     {
       "name": "title",

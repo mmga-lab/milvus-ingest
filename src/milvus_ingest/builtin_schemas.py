@@ -13,21 +13,21 @@ SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
 # Schema metadata
 BUILTIN_SCHEMAS = {
-    "simple": {
-        "name": "Simple Example",
-        "description": "Simple example schema for getting started with basic fields",
-        "use_cases": ["Learning", "Testing", "Quick start"],
+    "quickstart": {
+        "name": "Quick Start",
+        "description": "Basic schema for getting started with essential fields (uses auto_id=true)",
+        "use_cases": ["Learning", "Testing", "Quick start", "Auto ID demonstration"],
         "fields_count": 6,
         "vector_dims": [128],
-        "file": "simple.json",
+        "file": "quickstart.json",
     },
-    "dynamic_example": {
-        "name": "Dynamic Fields Example",
-        "description": "Example schema demonstrating dynamic field capabilities for flexible data insertion",
-        "use_cases": ["Dynamic data", "Schema evolution", "Flexible fields"],
+    "dynamic_fields": {
+        "name": "Dynamic Fields",
+        "description": "Schema demonstrating dynamic field capabilities with VarChar auto_id for flexible data insertion",
+        "use_cases": ["Dynamic data", "Schema evolution", "Flexible fields", "VarChar auto ID demonstration"],
         "fields_count": 4,
         "vector_dims": [384],
-        "file": "dynamic_example.json",
+        "file": "dynamic_fields.json",
     },
     "ecommerce": {
         "name": "E-commerce Products",
@@ -89,17 +89,17 @@ BUILTIN_SCHEMAS = {
         "vector_dims": [768],
         "file": "ecommerce_partitioned.json",
     },
-    "cardinality_demo": {
-        "name": "Cardinality Demo",
-        "description": "Demonstration of different data distribution patterns using cardinality_ratio and enum_values",
+    "data_distribution": {
+        "name": "Data Distribution",
+        "description": "Schema showcasing different data distribution patterns using cardinality_ratio and enum_values",
         "use_cases": [
             "Data distribution testing",
             "Performance benchmarking",
-            "Schema design examples",
+            "Schema design patterns",
         ],
         "fields_count": 10,
         "vector_dims": [128],
-        "file": "cardinality_demo.json",
+        "file": "data_distribution.json",
     },
     "audio_transcripts": {
         "name": "Audio Transcripts",
@@ -137,9 +137,9 @@ BUILTIN_SCHEMAS = {
         "vector_dims": [512, 256],
         "file": "face_recognition.json",
     },
-    "default_values_demo": {
-        "name": "Default Values Demo",
-        "description": "Demonstration of default_value field parameter for handling missing data during insertion",
+    "default_values": {
+        "name": "Default Values",
+        "description": "Schema with default_value field parameters for handling missing data during insertion",
         "use_cases": [
             "Data migration with missing values",
             "Flexible data insertion",
@@ -147,7 +147,7 @@ BUILTIN_SCHEMAS = {
         ],
         "fields_count": 9,
         "vector_dims": [768],
-        "file": "default_values_demo.json",
+        "file": "default_values.json",
     },
     "full_text_search": {
         "name": "Full-Text Search",
@@ -162,11 +162,11 @@ BUILTIN_SCHEMAS = {
         "vector_dims": [768],
         "file": "full_text_search.json",
     },
-    "bm25_demo": {
-        "name": "BM25 Function Demo",
-        "description": "Comprehensive demonstration of BM25 functions with multiple text fields for advanced full-text search",
+    "text_search_advanced": {
+        "name": "Advanced Text Search",
+        "description": "Comprehensive BM25 functions with multiple text fields for advanced full-text search",
         "use_cases": [
-            "BM25 function demonstration",
+            "Advanced BM25 search",
             "Multi-field full-text search",
             "Hybrid search systems",
             "Advanced text retrieval",
@@ -174,7 +174,7 @@ BUILTIN_SCHEMAS = {
         ],
         "fields_count": 17,
         "vector_dims": [768],
-        "file": "bm25_demo.json",
+        "file": "text_search_advanced.json",
     },
 }
 

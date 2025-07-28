@@ -7,7 +7,6 @@
       "name": "product_id",
       "type": "Int64",
       "is_primary": true,
-      "auto_id": true,
       "description": "Unique product identifier"
     },
     {

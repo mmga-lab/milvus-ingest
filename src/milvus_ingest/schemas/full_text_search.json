@@ -6,8 +6,7 @@
       "name": "doc_id",
       "type": "Int64",
       "is_primary": true,
-      "auto_id": true,
-      "description": "Auto-generated document ID"
+      "description": "Document identifier"
     },
     {
       "name": "title",

@@ -1,5 +1,5 @@
 {
-  "collection_name": "simple_example",
+  "collection_name": "quickstart_example",
   "description": "Simple example schema for getting started",
   "fields": [
     {

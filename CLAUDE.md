@@ -76,7 +76,7 @@ pdm publish       # Publish to PyPI (requires PDM_PUBLISH_TOKEN)
 pdm install
 
 # High-performance data generation commands (optimized for large-scale datasets)
-milvus-ingest generate --builtin simple --total-rows 100000 --preview        # Generate 100K rows (formerly --rows)
+milvus-ingest generate --builtin quickstart --total-rows 100000 --preview        # Generate 100K rows (formerly --rows)
 milvus-ingest generate --schema example_schema.json --total-rows 1000000     # Generate 1M rows
 milvus-ingest generate --schema schema.json --total-rows 5000000 --batch-size 100000 # Use large batch size
 
@@ -100,7 +100,7 @@ milvus-ingest generate --schema schema.json --out mydata --force   # Force overw
 
 # Schema management commands
 milvus-ingest schema list                    # List all schemas
-milvus-ingest schema show simple            # Show schema details
+milvus-ingest schema show quickstart            # Show schema details
 milvus-ingest schema add myschema file.json # Add custom schema
 milvus-ingest schema remove myschema        # Remove custom schema
 milvus-ingest schema help                   # Schema format help
