@@ -549,19 +549,30 @@ class MilvusVerifier:
 
         return success
 
+
     def _test_vector_search(
         self, vector_field: dict[str, Any], sample_size: int
     ) -> bool:
         """Test vector search returns reasonable results."""
         field_name = vector_field["name"]
-        # dimension = vector_field.get("dimension", 768)  # Not used currently
 
-        # Sample some vectors
+        # Get primary key field for result identification
+        pk_field = None
+        for field in self.schema.get("fields", []):
+            if field.get("is_primary_key") or field.get("is_primary"):
+                pk_field = field["name"]
+                break
+
+        if not pk_field:
+            display_info("No primary key field found, skipping vector search test")
+            return False
+
+        # Sample some vectors with their primary keys
         try:
             sample_data = self.client.query(
                 collection_name=self.collection_name,
                 filter="",
-                output_fields=[field_name],
+                output_fields=[field_name, pk_field],
                 limit=sample_size,
             )
         except Exception as e:
@@ -572,35 +583,37 @@ class MilvusVerifier:
         passed = 0
         for row in sample_data:
             query_vector = row[field_name]
+            query_pk = row[pk_field]
             try:
+                # Use search without hardcoded parameters to let Milvus use index defaults
                 search_results = self.client.search(
                     collection_name=self.collection_name,
                     data=[query_vector],
                     anns_field=field_name,
                     limit=10,
-                    search_params={"metric_type": "L2", "params": {"nprobe": 10}},
+                    output_fields=[pk_field],
                 )
 
-                # First result should be the exact match with distance ~0
+                # Check if the query vector itself is returned as the first result
                 if (
                     search_results
                     and len(search_results[0]) > 0
-                    and search_results[0][0].distance < 0.001
+                    and search_results[0][0].entity.get(pk_field) == query_pk
                 ):
                     passed += 1
             except Exception as e:
                 logger.debug(f"Vector search failed: {e}")
 
-        success_rate = passed / len(sample_data) if sample_data else 0
-        success = success_rate > 0.8  # 80% success rate for vector search
+        recall_at_1 = passed / len(sample_data) if sample_data else 0
+        success = recall_at_1 > 0.9  # 90% recall@1 for vector search
 
         if success:
             display_success(
-                f"✓ Vector search: {passed}/{len(sample_data)} passed ({success_rate:.1%})"
+                f"✓ Vector search recall@1: {passed}/{len(sample_data)} passed ({recall_at_1:.1%})"
             )
         else:
             display_error(
-                f"✗ Vector search: {passed}/{len(sample_data)} passed ({success_rate:.1%})"
+                f"✗ Vector search recall@1: {passed}/{len(sample_data)} passed ({recall_at_1:.1%})"
             )
 
         return success
@@ -805,6 +818,7 @@ class MilvusVerifier:
         except Exception as e:
             logger.debug(f"Failed to load source data: {e}")
             return []
+
 
     def _display_summary(self, results: dict[str, bool]) -> None:
         """Display verification summary."""
