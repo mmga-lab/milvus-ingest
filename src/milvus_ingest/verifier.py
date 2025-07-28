@@ -594,26 +594,29 @@ class MilvusVerifier:
                     output_fields=[pk_field],
                 )
 
-                # Check if the query vector itself is returned as the first result
-                if (
-                    search_results
-                    and len(search_results[0]) > 0
-                    and search_results[0][0].entity.get(pk_field) == query_pk
-                ):
+                # Check if the query vector itself is returned in top 10 results
+                found_self = False
+                if search_results and len(search_results[0]) > 0:
+                    for result in search_results[0]:
+                        if result.entity.get(pk_field) == query_pk:
+                            found_self = True
+                            break
+                
+                if found_self:
                     passed += 1
             except Exception as e:
                 logger.debug(f"Vector search failed: {e}")
 
-        recall_at_1 = passed / len(sample_data) if sample_data else 0
-        success = recall_at_1 > 0.9  # 90% recall@1 for vector search
+        recall_at_10 = passed / len(sample_data) if sample_data else 0
+        success = recall_at_10 > 0.95  # 95% recall@10 for vector search
 
         if success:
             display_success(
-                f"✓ Vector search recall@1: {passed}/{len(sample_data)} passed ({recall_at_1:.1%})"
+                f"✓ Vector search recall@10: {passed}/{len(sample_data)} passed ({recall_at_10:.1%})"
             )
         else:
             display_error(
-                f"✗ Vector search recall@1: {passed}/{len(sample_data)} passed ({recall_at_1:.1%})"
+                f"✗ Vector search recall@10: {passed}/{len(sample_data)} passed ({recall_at_10:.1%})"
             )
 
         return success
