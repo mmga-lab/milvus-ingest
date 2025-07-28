@@ -74,31 +74,30 @@ class MilvusVerifier:
             "\n[bold]🔍 Running scalar field verification with query tests...[/bold]"
         )
 
-        # Check AUTO_ID compatibility
-        if not self._check_auto_id_compatibility("scalar"):
-            return {
-                "row_count": False,
-                "scalar_fields": False,
-                "query_correctness": False,
-            }
-
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. Calculate optimal sample size
-        total_rows = self.generation_info.get("total_rows", 0)
-        optimal_sample_size = self._calculate_sample_size(total_rows)
-        self.console.print(
-            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
-        )
+        # 2. Check AUTO_ID compatibility for field value verification
+        if not self._check_auto_id_field_verification("scalar"):
+            # Skip field verification but continue with query tests
+            results["scalar_fields"] = True  # Mark as passed (skipped)
+        else:
+            # Calculate optimal sample size
+            total_rows = self.generation_info.get("total_rows", 0)
+            optimal_sample_size = self._calculate_sample_size(total_rows)
+            self.console.print(
+                f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+            )
 
-        # 3. Scalar field comparison
-        results["scalar_fields"] = self._verify_scalar_field_values(optimal_sample_size)
+            # Scalar field comparison
+            results["scalar_fields"] = self._verify_scalar_field_values(
+                optimal_sample_size
+            )
 
-        # 4. Query/search correctness with 1000 samples
+        # 3. Query/search correctness with 1000 samples (always run)
         results["query_correctness"] = self._verify_query_correctness(1000)
 
         self._display_summary(results)
@@ -114,27 +113,28 @@ class MilvusVerifier:
             "\n[bold]🔍 Running full field verification with query tests...[/bold]"
         )
 
-        # Check AUTO_ID compatibility
-        if not self._check_auto_id_compatibility("full"):
-            return {"row_count": False, "all_fields": False, "query_correctness": False}
-
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. Calculate optimal sample size
-        total_rows = self.generation_info.get("total_rows", 0)
-        optimal_sample_size = self._calculate_sample_size(total_rows)
-        self.console.print(
-            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
-        )
+        # 2. Check AUTO_ID compatibility for field value verification
+        if not self._check_auto_id_field_verification("full"):
+            # Skip field verification but continue with query tests
+            results["all_fields"] = True  # Mark as passed (skipped)
+        else:
+            # Calculate optimal sample size
+            total_rows = self.generation_info.get("total_rows", 0)
+            optimal_sample_size = self._calculate_sample_size(total_rows)
+            self.console.print(
+                f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+            )
 
-        # 3. All field comparison (including vectors)
-        results["all_fields"] = self._verify_all_field_values(optimal_sample_size)
+            # All field comparison (including vectors)
+            results["all_fields"] = self._verify_all_field_values(optimal_sample_size)
 
-        # 4. Query/search correctness with 1000 samples
+        # 3. Query/search correctness with 1000 samples (always run)
         results["query_correctness"] = self._verify_query_correctness(1000)
 
         self._display_summary(results)
@@ -146,25 +146,28 @@ class MilvusVerifier:
 
         self.console.print("\n[bold]🔍 Running scalar field verification...[/bold]")
 
-        # Check AUTO_ID compatibility
-        if not self._check_auto_id_compatibility("scalar"):
-            return {"row_count": False, "scalar_fields": False}
-
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. Calculate optimal sample size
-        total_rows = self.generation_info.get("total_rows", 0)
-        optimal_sample_size = self._calculate_sample_size(total_rows)
-        self.console.print(
-            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
-        )
+        # 2. Check AUTO_ID compatibility for field value verification
+        if not self._check_auto_id_field_verification("scalar"):
+            # Skip field verification for AUTO_ID scenarios
+            results["scalar_fields"] = True  # Mark as passed (skipped)
+        else:
+            # Calculate optimal sample size
+            total_rows = self.generation_info.get("total_rows", 0)
+            optimal_sample_size = self._calculate_sample_size(total_rows)
+            self.console.print(
+                f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+            )
 
-        # 3. Scalar field comparison
-        results["scalar_fields"] = self._verify_scalar_field_values(optimal_sample_size)
+            # Scalar field comparison
+            results["scalar_fields"] = self._verify_scalar_field_values(
+                optimal_sample_size
+            )
 
         self._display_summary(results)
         return results
@@ -177,27 +180,28 @@ class MilvusVerifier:
             "\n[bold]🔍 Running full field verification with query tests...[/bold]"
         )
 
-        # Check AUTO_ID compatibility
-        if not self._check_auto_id_compatibility("full"):
-            return {"row_count": False, "all_fields": False, "query_correctness": False}
-
         # Ensure collection is loaded
         self.client.load_collection(self.collection_name)
 
         # 1. Row count verification
         results["row_count"] = self._verify_row_count()
 
-        # 2. Calculate optimal sample size
-        total_rows = self.generation_info.get("total_rows", 0)
-        optimal_sample_size = self._calculate_sample_size(total_rows)
-        self.console.print(
-            f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
-        )
+        # 2. Check AUTO_ID compatibility for field value verification
+        if not self._check_auto_id_field_verification("full"):
+            # Skip field verification but continue with query tests
+            results["all_fields"] = True  # Mark as passed (skipped)
+        else:
+            # Calculate optimal sample size
+            total_rows = self.generation_info.get("total_rows", 0)
+            optimal_sample_size = self._calculate_sample_size(total_rows)
+            self.console.print(
+                f"[dim]Using {optimal_sample_size:,} samples for field verification[/dim]"
+            )
 
-        # 3. All field comparison (including vectors)
-        results["all_fields"] = self._verify_all_field_values(optimal_sample_size)
+            # All field comparison (including vectors)
+            results["all_fields"] = self._verify_all_field_values(optimal_sample_size)
 
-        # 4. Query/search correctness with 1000 samples
+        # 3. Query/search correctness with 1000 samples (always run)
         results["query_correctness"] = self._verify_query_correctness(1000)
 
         self._display_summary(results)
@@ -258,9 +262,30 @@ class MilvusVerifier:
             display_info("Could not load source data for field consistency check")
             return False
 
-        # For AUTO_ID fields, we can't do direct value comparison since source data doesn't contain the IDs
-        # We'll sample records by row order instead
+        # Check if we have AUTO_ID fields
+        has_auto_id = any(
+            field.get("auto_id", False) for field in self.schema.get("fields", [])
+        )
+
+        if has_auto_id:
+            self.console.print(
+                "[dim]🔄 AUTO_ID detected: Using row index-based comparison[/dim]"
+            )
+            return self._verify_auto_id_scenario(
+                source_data, sample_size, exclude_vectors
+            )
+        else:
+            self.console.print("[dim]🔑 Using primary key-based comparison[/dim]")
+            return self._verify_primary_key_scenario(
+                source_data, sample_size, exclude_vectors
+            )
+
+    def _verify_auto_id_scenario(
+        self, source_data: list[dict], sample_size: int, exclude_vectors: bool = False
+    ) -> bool:
+        """Verify field values for AUTO_ID scenario using row index alignment."""
         try:
+            # Query Milvus data in insertion order (no sorting to maintain order)
             milvus_data = self.client.query(
                 collection_name=self.collection_name,
                 filter="",  # Get all records
@@ -276,7 +301,108 @@ class MilvusVerifier:
         milvus_lookup = {i: milvus_data[i] for i in range(sample_count)}
         source_lookup = {i: source_data[i] for i in range(sample_count)}
 
-        # Filter fields based on exclude_vectors flag
+        return self._verify_fields_with_index_alignment(
+            source_lookup, milvus_lookup, sample_count, exclude_vectors
+        )
+
+    def _verify_primary_key_scenario(
+        self, source_data: list[dict], sample_size: int, exclude_vectors: bool = False
+    ) -> bool:
+        """Verify field values for non-AUTO_ID scenario using primary key alignment."""
+        # Get primary key field
+        pk_field = None
+        for field in self.schema.get("fields", []):
+            if field.get("is_primary_key") or field.get("is_primary"):
+                pk_field = field["name"]
+                break
+
+        if not pk_field:
+            display_info(
+                "No primary key field found, falling back to index-based comparison"
+            )
+            # Fallback to index-based comparison
+            try:
+                milvus_data = self.client.query(
+                    collection_name=self.collection_name,
+                    filter="",
+                    output_fields=["*"],
+                    limit=min(sample_size, len(source_data)),
+                )
+                sample_count = min(len(source_data), len(milvus_data))
+                milvus_lookup = {i: milvus_data[i] for i in range(sample_count)}
+                source_lookup = {i: source_data[i] for i in range(sample_count)}
+                return self._verify_fields_with_index_alignment(
+                    source_lookup, milvus_lookup, sample_count, exclude_vectors
+                )
+            except Exception as e:
+                display_error(f"Failed to query Milvus data: {e}")
+                return False
+
+        # Sample some records from Milvus using primary key
+        pk_values = [str(row[pk_field]) for row in source_data[:sample_size]]
+        filter_expr = f"{pk_field} in {pk_values}"
+
+        try:
+            milvus_data = self.client.query(
+                collection_name=self.collection_name,
+                filter=filter_expr,
+                output_fields=["*"],
+                limit=sample_size,
+            )
+        except Exception as e:
+            display_error(f"Failed to query Milvus data: {e}")
+            return False
+
+        # Create lookup for Milvus data using primary key
+        milvus_lookup = {str(row[pk_field]): row for row in milvus_data}
+
+        # Verify each field
+        field_results = {}
+        fields_to_verify = self._get_fields_to_verify(exclude_vectors)
+        all_passed = True
+
+        for field in fields_to_verify:
+            field_name = field["name"]
+            field_type = field["type"]
+
+            field_passed = self._verify_field_values_by_primary_key(
+                field_name, field_type, source_data, milvus_lookup, pk_field
+            )
+            field_results[field_name] = field_passed
+            all_passed = all_passed and field_passed
+
+        # Display field verification results
+        self._display_field_verification_table(fields_to_verify, field_results)
+        return all_passed
+
+    def _verify_fields_with_index_alignment(
+        self,
+        source_lookup: dict[int, dict],
+        milvus_lookup: dict[int, dict],
+        sample_count: int,
+        exclude_vectors: bool = False,
+    ) -> bool:
+        """Verify fields using index-based alignment."""
+        fields_to_verify = self._get_fields_to_verify(exclude_vectors)
+        field_results = {}
+        all_passed = True
+
+        for field in fields_to_verify:
+            field_name = field["name"]
+            field_type = field["type"]
+
+            field_passed = self._verify_field_values_by_index(
+                field_name, field_type, source_lookup, milvus_lookup, sample_count
+            )
+            field_results[field_name] = field_passed
+            all_passed = all_passed and field_passed
+
+        # Display field verification results
+        self._display_field_verification_table(fields_to_verify, field_results)
+        return all_passed
+
+    def _get_fields_to_verify(self, exclude_vectors: bool = False) -> list[dict]:
+        """Get list of fields to verify based on configuration."""
         fields_to_verify = []
         for field in self.schema.get("fields", []):
             field_name = field["name"]
@@ -295,21 +421,12 @@ class MilvusVerifier:
 
             fields_to_verify.append(field)
 
-        # Verify each field using index-based comparison
-        field_results = {}
-        all_passed = True
+        return fields_to_verify
 
-        for field in fields_to_verify:
-            field_name = field["name"]
-            field_type = field["type"]
-
-            field_passed = self._verify_field_values_by_index(
-                field_name, field_type, source_lookup, milvus_lookup, sample_count
-            )
-            field_results[field_name] = field_passed
-            all_passed = all_passed and field_passed
-
-        # Display field verification results
+    def _display_field_verification_table(
+        self, fields_to_verify: list[dict], field_results: dict[str, bool]
+    ) -> None:
+        """Display field verification results in a table."""
         table = Table(title="Field Value Verification")
         table.add_column("Field", style="cyan")
         table.add_column("Type", style="magenta")
@@ -322,7 +439,51 @@ class MilvusVerifier:
                 table.add_row(field_name, field["type"], status)
 
         self.console.print(table)
-        return all_passed
+
+    def _verify_field_values_by_primary_key(
+        self,
+        field_name: str,
+        field_type: str,
+        source_data: list[dict],
+        milvus_lookup: dict[str, dict],
+        pk_field: str,
+    ) -> bool:
+        """Verify field values using primary key-based comparison."""
+        mismatches = 0
+        total_compared = 0
+
+        for source_row in source_data:
+            pk_value = str(source_row[pk_field])
+            milvus_row = milvus_lookup.get(pk_value)
+
+            if not milvus_row or field_name not in milvus_row:
+                continue
+
+            source_value = source_row.get(field_name)
+            milvus_value = milvus_row[field_name]
+
+            # Handle different data type comparisons
+            if not self._values_match(source_value, milvus_value, field_type):
+                mismatches += 1
+                if mismatches <= 5:  # Log first few mismatches
+                    logger.debug(
+                        f"Field {field_name} mismatch for PK {pk_value}: source={source_value}, "
+                        f"milvus={milvus_value}"
+                    )
+
+            total_compared += 1
+
+        # Allow small percentage of mismatches due to float precision, etc.
+        mismatch_rate = mismatches / total_compared if total_compared > 0 else 0
+        success = mismatch_rate < 0.05  # 5% threshold
+
+        if not success:
+            display_info(
+                f"Field {field_name}: {mismatches}/{total_compared} mismatches "
+                f"({mismatch_rate:.1%})"
+            )
+
+        return success
 
     def _verify_field_consistency(self, sample_size: int = 1000) -> bool:
         """Verify field data types and value consistency."""
@@ -921,20 +1082,37 @@ class MilvusVerifier:
         # Ensure minimum of 1000 samples for statistical significance
         return max(sample_size, 1000)
 
-    def _check_auto_id_compatibility(self, verification_level: str) -> bool:
-        """Check if verification level is compatible with AUTO_ID fields."""
+    def _check_auto_id_field_verification(self, verification_level: str) -> bool:
+        """Check if field verification is possible with AUTO_ID fields."""
         if verification_level not in ["scalar", "full"]:
             return True
 
         # Check if there are AUTO_ID fields in the schema
-        for field in self.schema.get("fields", []):
-            if field.get("auto_id", False):
-                display_error(
-                    f"❌ {verification_level.capitalize()} verification is not supported with AUTO_ID fields.\n"
-                    f"   AUTO_ID field '{field['name']}' prevents data alignment between source and Milvus.\n"
-                    f"   Please use 'count' level verification instead."
-                )
-                return False
+        has_auto_id = any(
+            field.get("auto_id", False) for field in self.schema.get("fields", [])
+        )
+
+        if has_auto_id:
+            auto_id_field = next(
+                (
+                    field["name"]
+                    for field in self.schema.get("fields", [])
+                    if field.get("auto_id", False)
+                ),
+                "unknown",
+            )
+
+            self.console.print(
+                f"[yellow]⚠️  AUTO_ID field '{auto_id_field}' detected: "
+                f"Skipping {verification_level} field value verification[/yellow]"
+            )
+            self.console.print(
+                "[dim]   Field verification requires reliable data alignment, which is not possible with AUTO_ID.[/dim]"
+            )
+            self.console.print(
+                "[dim]   Query/search functionality verification will continue normally.[/dim]"
+            )
+            return False
 
         return True
 
@@ -949,8 +1127,8 @@ class MilvusVerifier:
 
         check_descriptions = {
             "row_count": "Row count matches expected",
-            "scalar_fields": "Scalar field values match source data",
-            "all_fields": "All field values match source data",
+            "scalar_fields": "Scalar field values match source data (or skipped for AUTO_ID)",
+            "all_fields": "All field values match source data (or skipped for AUTO_ID)",
             "field_consistency": "Field values match source data",
             "query_correctness": "Queries and searches return correct results",
             "special_fields": "Special field behaviors work correctly",
