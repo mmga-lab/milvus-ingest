@@ -102,6 +102,7 @@ dmypy.json
 *.npy
 !/schema.json
 !src/milvus_ingest/schemas/**/*.json
+!examples/**/*.json
 
 # milvus volume
 deploy/volumes

@@ -1,6 +1,6 @@
 [project]
 name = "milvus-ingest"
-version = "0.1.1"
+version = "0.1.2"
 description = "High-performance data ingestion tool for Milvus vector database with vectorized operations"
 keywords = ["milvus", "vector-database", "data-ingestion", "bulk-import", "data-generation", "high-performance", "vectorization", "etl"]
 classifiers = ["Development Status :: 4 - Beta", "Intended Audience :: Developers", "License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Topic :: Database", "Topic :: Software Development :: Testing", "Topic :: Scientific/Engineering", "Topic :: System :: Benchmark", "Operating System :: OS Independent"]

@@ -368,6 +368,29 @@ milvus-ingest to-milvus insert ./products/ \
 - ✅ Support for authentication and custom databases
 - ✅ Connection testing before import
 
+### Verify Data in Milvus
+
+After inserting or importing data, you can verify that all data was successfully loaded:
+
+```bash
+# Verify using collection name from meta.json
+milvus-ingest to-milvus verify ./products/
+
+# Verify specific collection
+milvus-ingest to-milvus verify ./products/ --collection-name product_catalog
+
+# Verify on remote Milvus
+milvus-ingest to-milvus verify ./products/ \
+    --uri http://192.168.1.100:19530 \
+    --token your-api-token
+```
+
+**Verify Command Features:**
+- ✅ Compares row count in Milvus with original count from meta.json
+- ✅ Clear pass/fail status with detailed mismatch information
+- ✅ Helpful debugging hints for common issues
+- ✅ Support for remote Milvus instances with authentication
+
 ### Bulk Import from S3/MinIO
 
 For very large datasets, use bulk import with pre-uploaded files:

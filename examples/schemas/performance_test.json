@@ -14,8 +14,7 @@
     },
     {
       "name": "sparse_vector",
-      "type": "SparseFloatVector",
-      "dim": 1000
+      "type": "SparseFloatVector"
     },
     {
       "name": "text",

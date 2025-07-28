@@ -179,14 +179,14 @@ def main(ctx: click.Context, verbose: bool = False) -> None:
     help="Number of partitions to simulate. Requires partition key field in schema.",
 )
 @click.option(
-    "--shards", 
+    "--shards",
     "num_shards",
     type=int,
     help="Number of shards (VChannels) to simulate. Data distributed based on primary key hash.",
 )
 @click.option(
     "--workers",
-    "num_workers", 
+    "num_workers",
     type=int,
     help="Number of parallel worker processes for file generation. Default: CPU count.",
 )
@@ -400,26 +400,28 @@ def generate(
 
         # Handle preview mode - generate a few rows and display them
         if preview:
-            from .optimized_writer import generate_data_optimized
-            import tempfile as tempfile_mod
-            import pandas as pd
             import json as json_mod
-            
+            import tempfile as tempfile_mod
+
+            import pandas as pd
+
+            from .optimized_writer import generate_data_optimized
+
             with tempfile_mod.TemporaryDirectory() as temp_dir:
                 # Generate 5 rows for preview
                 preview_rows = 5
                 temp_output = Path(temp_dir) / "preview"
                 temp_output.mkdir(exist_ok=True)
-                
+
                 # Create a temporary schema file for the generator
                 temp_schema_file = Path(temp_dir) / "temp_schema.json"
                 temp_schema = {
                     "collection_name": collection_name or "preview",
-                    "fields": fields
+                    "fields": fields,
                 }
-                with open(temp_schema_file, 'w') as f:
+                with open(temp_schema_file, "w") as f:
                     json_mod.dump(temp_schema, f)
-                
+
                 try:
                     files_created = generate_data_optimized(
                         schema_path=temp_schema_file,
@@ -434,25 +436,28 @@ def generate(
                         file_size=None,  # Don't use size controls for preview
                         file_count=None,
                     )
-                    
+
                     if files_created:
                         # Read and display the generated data
                         parquet_file = files_created[0]  # First file
                         df = pd.read_parquet(parquet_file)
-                        
+
                         from rich.console import Console
                         from rich.table import Table
+
                         console = Console()
-                        
-                        console.print(f"\n[bold green]Preview (top 5 rows):[/bold green]")
-                        
+
+                        console.print(
+                            "\n[bold green]Preview (top 5 rows):[/bold green]"
+                        )
+
                         # Create table for preview
                         table = Table(show_header=True, header_style="bold magenta")
-                        
+
                         # Add columns
                         for col in df.columns:
                             table.add_column(col, style="cyan", no_wrap=True)
-                        
+
                         # Add rows (limit to 5)
                         for i in range(min(len(df), 5)):
                             row_values = []
@@ -462,7 +467,9 @@ def generate(
                                 if isinstance(val, list):
                                     # For arrays/lists, show first few items
                                     if len(val) > 3:
-                                        display_val = f"[{', '.join(map(str, val[:3]))}...]"
+                                        display_val = (
+                                            f"[{', '.join(map(str, val[:3]))}...]"
+                                        )
                                     else:
                                         display_val = str(val)
                                 elif isinstance(val, dict):
@@ -474,16 +481,17 @@ def generate(
                                         display_val = display_val[:27] + "..."
                                 row_values.append(display_val)
                             table.add_row(*row_values)
-                        
+
                         console.print(table)
                         console.print()
-                        
+
                 except Exception as e:
                     logger.error("Failed to generate preview data", error=str(e))
                     from rich.console import Console
+
                     console = Console()
                     console.print(f"[red]Error generating preview: {e}[/red]")
-            
+
             return
 
     except Exception as e:
@@ -536,12 +544,12 @@ def generate(
     try:
         # High-performance parallel generator (default and only mode)
         logger.info("Using vectorized high-performance generator")
-        
+
         # If progress bar will be shown, suppress INFO logs before starting generation
         if not no_progress:
             logger.info("Starting high-performance vectorized generator")
             setup_logging(verbose=verbose, log_level="WARNING")
-        
+
         _save_with_high_performance_generator(
             schema_path,
             total_rows,
@@ -985,6 +993,158 @@ def insert_to_milvus(
         display_error(f"Insert failed: {e}")
 
 
+@to_milvus.command("verify")
+@click.argument(
+    "data_path",
+    type=click.Path(exists=True, dir_okay=True, file_okay=False, path_type=Path),
+)
+@click.option(
+    "--collection-name",
+    help="Collection name to verify (overrides collection name from meta.json)",
+)
+@click.option(
+    "--uri",
+    default="http://localhost:19530",
+    help="Milvus server URI (default: http://localhost:19530)",
+)
+@click.option(
+    "--token",
+    default="",
+    help="Token for authentication",
+)
+@click.option(
+    "--db-name",
+    default="default",
+    help="Database name (default: default)",
+)
+def verify_milvus_data(
+    data_path: Path,
+    collection_name: str | None = None,
+    uri: str = "http://localhost:19530",
+    token: str = "",
+    db_name: str = "default",
+) -> None:
+    """Verify that data in Milvus matches the original generated data count.
+
+    \b
+    Examples:
+        # Verify data using collection name from meta.json
+        milvus-ingest to-milvus verify ./output
+
+        # Verify specific collection
+        milvus-ingest to-milvus verify ./output --collection-name my_collection
+
+        # Verify on remote Milvus
+        milvus-ingest to-milvus verify ./output --uri http://192.168.1.100:19530 --token your_token
+    """
+    from pymilvus import MilvusClient
+
+    try:
+        # Load metadata
+        meta_file = data_path / "meta.json"
+        if not meta_file.exists():
+            display_error(f"meta.json not found in {data_path}")
+            raise SystemExit(1)
+
+        with open(meta_file) as f:
+            metadata = json.load(f)
+
+        # Get expected row count from metadata
+        expected_rows = metadata.get("generation_info", {}).get("total_rows", 0)
+        if expected_rows == 0:
+            display_error("Could not find total_rows in meta.json")
+            raise SystemExit(1)
+
+        # Get collection name
+        final_collection_name = collection_name or metadata.get("schema", {}).get(
+            "collection_name"
+        )
+        if not final_collection_name:
+            display_error(
+                "Collection name not found in meta.json and not provided via --collection-name"
+            )
+            raise SystemExit(1)
+
+        # Connect to Milvus using MilvusClient
+        click.echo("Connecting to Milvus...")
+        client = MilvusClient(
+            uri=uri,
+            token=token,
+            db_name=db_name,
+        )
+
+        # Check if collection exists
+        if not client.has_collection(final_collection_name):
+            display_error(
+                f"Collection '{final_collection_name}' does not exist in Milvus"
+            )
+            raise SystemExit(1)
+
+        # Count rows in collection
+        click.echo(f"Counting rows in collection '{final_collection_name}'...")
+
+        # Query to count all rows - we need to use a count query
+        # First, load the collection
+        client.load_collection(final_collection_name)
+
+        # Query count using empty filter to get all rows
+        result = client.query(
+            collection_name=final_collection_name,
+            filter="",  # Empty filter to match all
+            output_fields=["count(*)"],
+        )
+
+        # Extract row count from result
+        actual_rows = result[0].get("count(*)", 0) if result else 0
+
+        # Compare counts
+        click.echo("\n" + "=" * 50)
+        click.echo(f"Collection: {final_collection_name}")
+        click.echo(f"Expected rows (from meta.json): {expected_rows:,}")
+        click.echo(f"Actual rows (in Milvus): {actual_rows:,}")
+        click.echo("=" * 50)
+
+        if actual_rows == expected_rows:
+            display_success(
+                "✓ Verification passed!", f"Row count matches: {actual_rows:,} rows"
+            )
+        else:
+            difference = actual_rows - expected_rows
+            percentage = (actual_rows / expected_rows * 100) if expected_rows > 0 else 0
+
+            display_error(
+                "✗ Verification failed!",
+                f"Row count mismatch:\n"
+                f"  Expected: {expected_rows:,} rows\n"
+                f"  Actual: {actual_rows:,} rows\n"
+                f"  Difference: {difference:+,} rows ({percentage:.1f}% of expected)",
+            )
+
+            # Provide additional debugging info
+            if actual_rows < expected_rows:
+                click.echo("\nPossible causes:")
+                click.echo("  - Some batches may have failed during insert/import")
+                click.echo("  - The import job may still be in progress")
+                click.echo("  - Data files may have been corrupted or incomplete")
+            else:
+                click.echo("\nPossible causes:")
+                click.echo("  - Duplicate data may have been inserted")
+                click.echo("  - Multiple import operations may have been performed")
+
+    except Exception as e:
+        log_error_with_context(
+            e,
+            {
+                "data_path": str(data_path),
+                "collection": final_collection_name
+                if "final_collection_name" in locals()
+                else "unknown",
+            },
+        )
+        display_error(f"Verification failed: {e}")
+        raise SystemExit(1) from e
+
+
 @to_milvus.command("import")
 @click.option(
     "--collection-name",
@@ -1209,13 +1369,13 @@ def _save_with_high_performance_generator(
     try:
         if show_progress:
             from rich.console import Console
-            
+
             # Immediately set log level to WARNING before starting progress to suppress all INFO messages
             setup_logging(
-                verbose=verbose, 
+                verbose=verbose,
                 log_level="WARNING",  # Suppress INFO messages during progress
             )
-            
+
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -1227,11 +1387,11 @@ def _save_with_high_performance_generator(
             ) as progress:
                 # Reconfigure logging to use Rich's console for proper coordination
                 setup_logging(
-                    verbose=verbose, 
+                    verbose=verbose,
                     log_level="WARNING",  # Keep WARNING level during progress
-                    rich_console=progress.console
+                    rich_console=progress.console,
                 )
-                
+
                 task = progress.add_task(
                     "Generating data with high-performance mode...", total=total_rows
                 )
@@ -1259,14 +1419,17 @@ def _save_with_high_performance_generator(
 
                 # Ensure progress shows 100% at the end
                 progress.update(task, completed=total_rows)
-            
+
             # Restore original logging configuration after progress bar is closed
             setup_logging(verbose=verbose, log_level="DEBUG" if verbose else "INFO")
-            
+
             # Show completion summary after progress bar
             from rich.console import Console
+
             console = Console()
-            console.print(f"\n✅ [bold green]Generation completed![/bold green] {len(files_created)} files created with {total_rows:,} rows total")
+            console.print(
+                f"\n✅ [bold green]Generation completed![/bold green] {len(files_created)} files created with {total_rows:,} rows total"
+            )
         else:
             # Run without progress bar
             files_created = generate_data_optimized(

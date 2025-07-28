@@ -125,6 +125,12 @@ milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket m
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait  # Wait for completion
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret  # With credentials
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --drop-if-exists  # Drop and recreate
+
+# Verify data in Milvus
+# Note: Compares the row count in Milvus with the original count from meta.json
+milvus-ingest to-milvus verify ./output                                # Verify using collection name from meta.json
+milvus-ingest to-milvus verify ./output --collection-name my_collection # Verify specific collection
+milvus-ingest to-milvus verify ./output --uri http://192.168.1.100:19530 --token your-token  # Verify on remote Milvus
 ```
 
 ## Architecture Overview
@@ -175,7 +181,7 @@ This is a high-performance mock data generator for Milvus vector databases with 
 
 6. **CLI Architecture**: Click-based command groups (generate, schema, upload, to-milvus, clean) with rich terminal output for better user experience.
 
-7. **Milvus Integration**: Complete integration with Milvus including collection creation, partition/shard configuration, direct insertion, and bulk import from S3/MinIO storage.
+7. **Milvus Integration**: Complete integration with Milvus including collection creation, partition/shard configuration, direct insertion, bulk import from S3/MinIO storage, and data verification.
 
 ## Key Implementation Details
 
