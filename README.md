@@ -23,6 +23,8 @@
 - 🎨 **Rich customization** - Field constraints, nullable fields, auto-generated IDs
 - 🔍 **Schema exploration** - Validation, help commands, and schema details
 - 🏠 **Unified interface** - Use custom and built-in schemas interchangeably
+- ✅ **Comprehensive verification** - 3-level validation system with query/search correctness testing
+- 🧪 **Functional testing** - Automated query and vector search validation (1000 samples)
 
 ## Installation
 
@@ -54,6 +56,10 @@ milvus-ingest generate --builtin simple --rows 100000 --preview
 
 # Generate large e-commerce dataset with automatic file partitioning
 milvus-ingest generate --builtin ecommerce --rows 2500000 --out products/
+
+# Import to Milvus and verify data integrity
+milvus-ingest to-milvus insert ./products/ --uri http://localhost:19530
+milvus-ingest to-milvus verify ./products/ --level scalar --uri http://localhost:19530
 ```
 
 **Available Built-in Schemas:**
@@ -370,26 +376,49 @@ milvus-ingest to-milvus insert ./products/ \
 
 ### Verify Data in Milvus
 
-After inserting or importing data, you can verify that all data was successfully loaded:
+Comprehensive verification system with three progressive levels of validation (all include query/search correctness tests):
 
 ```bash
-# Verify using collection name from meta.json
-milvus-ingest to-milvus verify ./products/
+# Level 1: Row count + Query tests (default, fastest)
+milvus-ingest to-milvus verify ./products/                    # Quick verification
+milvus-ingest to-milvus verify ./products/ --level count      # Explicit level
 
-# Verify specific collection
-milvus-ingest to-milvus verify ./products/ --collection-name product_catalog
+# Level 2: Scalar fields + Query tests (excludes vectors for performance)  
+milvus-ingest to-milvus verify ./products/ --level scalar     # Business data accuracy
 
-# Verify on remote Milvus
-milvus-ingest to-milvus verify ./products/ \
+# Level 3: All fields + Query tests (includes vectors, most comprehensive)
+milvus-ingest to-milvus verify ./products/ --level full       # Complete validation
+
+# Remote Milvus verification
+milvus-ingest to-milvus verify ./products/ --level full \
     --uri http://192.168.1.100:19530 \
-    --token your-api-token
+    --token your-api-token \
+    --collection-name product_catalog
 ```
 
-**Verify Command Features:**
-- ✅ Compares row count in Milvus with original count from meta.json
-- ✅ Clear pass/fail status with detailed mismatch information
-- ✅ Helpful debugging hints for common issues
-- ✅ Support for remote Milvus instances with authentication
+**🔍 Comprehensive Verification Features:**
+
+**📊 Progressive Verification Levels:**
+- **Level 1 (count)**: Row count verification + 1000-sample query/search tests
+- **Level 2 (scalar)**: + Scalar field value validation (excludes vectors)  
+- **Level 3 (full)**: + Vector field validation (complete data quality assurance)
+
+**🧪 Query Correctness Testing:**
+- ✅ **1000-sample exact queries** - Verifies data retrieval functionality (95% success threshold)
+- ✅ **1000-sample vector searches** - Validates similarity search accuracy (80% success threshold)
+- ✅ **Functional validation** - Ensures imported data works correctly, not just exists
+
+**🎯 Smart Field Handling:**
+- ✅ **AUTO_ID detection** - Automatically skips auto-generated primary key fields
+- ✅ **Vector precision** - Uses numpy.allclose() with 1e-6 tolerance for float comparisons
+- ✅ **Data type support** - Specialized validation for vectors, floats, strings, JSON, arrays
+- ✅ **Error tolerance** - Allows up to 5% mismatch rate for floating-point precision differences
+
+**📋 Rich Output & Reporting:**
+- ✅ Detailed field-by-field verification tables with pass/fail status
+- ✅ Comprehensive summary reports with verification statistics  
+- ✅ Clear debugging information for failed validations
+- ✅ Performance metrics and success rates for query tests
 
 ### Bulk Import from S3/MinIO
 
@@ -471,6 +500,16 @@ milvus-ingest upload ./products/ s3://milvus-data/products/ \
 milvus-ingest to-milvus import ecommerce_products \
     s3://milvus-data/products/ \
     --wait
+
+# 3. Verify data integrity and functionality
+# Quick verification (row count + query tests)
+milvus-ingest to-milvus verify ./products/ --level count
+
+# Business data accuracy (scalar fields + query tests)  
+milvus-ingest to-milvus verify ./products/ --level scalar
+
+# Complete validation (all fields + query tests)
+milvus-ingest to-milvus verify ./products/ --level full
 ```
 
 ### Import Method Comparison
@@ -485,6 +524,12 @@ milvus-ingest to-milvus import ecommerce_products \
 - Maximum 1024 files per import request
 - Each file should not exceed 16GB
 - Collection must exist for bulk import (create with direct insert first if needed)
+- **Always verify data after import** using the comprehensive verification system
+
+**Verification Recommendations:**
+- Use `--level count` for quick post-import validation
+- Use `--level scalar` for business-critical data accuracy
+- Use `--level full` for complete data quality assurance
 
 ## 🛠️ Development
 

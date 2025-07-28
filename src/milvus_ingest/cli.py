@@ -1017,30 +1017,47 @@ def insert_to_milvus(
     default="default",
     help="Database name (default: default)",
 )
+@click.option(
+    "--level",
+    type=click.Choice(["count", "scalar", "full"], case_sensitive=False),
+    default="count",
+    help="Verification level: count (row count + query tests), scalar (scalar fields + query tests), full (all fields + query tests)",
+)
 def verify_milvus_data(
     data_path: Path,
     collection_name: str | None = None,
     uri: str = "http://localhost:19530",
     token: str = "",
     db_name: str = "default",
+    level: str = "count",
 ) -> None:
-    """Verify that data in Milvus matches the original generated data count.
+    """Verify that data in Milvus matches the original generated data.
+
+    Supports three verification levels (all include query/search correctness tests):
+    - count: Row count + query tests (default, fastest)
+    - scalar: Row count + scalar field values + query tests (excludes vectors)
+    - full: Row count + all field values + query tests (includes vectors)
 
     \b
     Examples:
-        # Verify data using collection name from meta.json
+        # Row count + query tests (default)
         milvus-ingest to-milvus verify ./output
 
-        # Verify specific collection
-        milvus-ingest to-milvus verify ./output --collection-name my_collection
+        # Scalar fields + query tests (excludes vectors)
+        milvus-ingest to-milvus verify ./output --level scalar
 
-        # Verify on remote Milvus
-        milvus-ingest to-milvus verify ./output --uri http://192.168.1.100:19530 --token your_token
+        # Full verification with all fields + query tests
+        milvus-ingest to-milvus verify ./output --level full
+
+        # Verify specific collection on remote Milvus
+        milvus-ingest to-milvus verify ./output --level full --collection-name my_collection --uri http://remote:19530
     """
     from pymilvus import MilvusClient
 
+    from .verifier import MilvusVerifier
+
     try:
-        # Load metadata
+        # Load metadata to get collection name
         meta_file = data_path / "meta.json"
         if not meta_file.exists():
             display_error(f"meta.json not found in {data_path}")
@@ -1048,12 +1065,6 @@ def verify_milvus_data(
 
         with open(meta_file) as f:
             metadata = json.load(f)
-
-        # Get expected row count from metadata
-        expected_rows = metadata.get("generation_info", {}).get("total_rows", 0)
-        if expected_rows == 0:
-            display_error("Could not find total_rows in meta.json")
-            raise SystemExit(1)
 
         # Get collection name
         final_collection_name = collection_name or metadata.get("schema", {}).get(
@@ -1080,56 +1091,35 @@ def verify_milvus_data(
             )
             raise SystemExit(1)
 
-        # Count rows in collection
-        click.echo(f"Counting rows in collection '{final_collection_name}'...")
+        # Create verifier and run verification based on level
+        verifier = MilvusVerifier(client, final_collection_name, data_path)
 
-        # Query to count all rows - we need to use a count query
-        # First, load the collection
-        client.load_collection(final_collection_name)
+        if level == "count":
+            # Level 1: Row count + query tests
+            click.echo("Running row count verification with query tests...")
+            results = verifier.verify_count_with_queries()
+            if not all(results.values()):
+                failed_checks = [k for k, v in results.items() if not v]
+                display_error(f"Verification failed: {', '.join(failed_checks)}")
+                raise SystemExit(1)
 
-        # Query count using empty filter to get all rows
-        result = client.query(
-            collection_name=final_collection_name,
-            filter="",  # Empty filter to match all
-            output_fields=["count(*)"],
-        )
+        elif level == "scalar":
+            # Level 2: Row count + scalar field comparison + query tests
+            click.echo("Running scalar field verification with query tests...")
+            results = verifier.verify_scalar_fields_with_queries()
+            if not all(results.values()):
+                failed_checks = [k for k, v in results.items() if not v]
+                display_error(f"Verification failed: {', '.join(failed_checks)}")
+                raise SystemExit(1)
 
-        # Extract row count from result
-        actual_rows = result[0].get("count(*)", 0) if result else 0
-
-        # Compare counts
-        click.echo("\n" + "=" * 50)
-        click.echo(f"Collection: {final_collection_name}")
-        click.echo(f"Expected rows (from meta.json): {expected_rows:,}")
-        click.echo(f"Actual rows (in Milvus): {actual_rows:,}")
-        click.echo("=" * 50)
-
-        if actual_rows == expected_rows:
-            display_success(
-                "✓ Verification passed!", f"Row count matches: {actual_rows:,} rows"
-            )
-        else:
-            difference = actual_rows - expected_rows
-            percentage = (actual_rows / expected_rows * 100) if expected_rows > 0 else 0
-
-            display_error(
-                "✗ Verification failed!",
-                f"Row count mismatch:\n"
-                f"  Expected: {expected_rows:,} rows\n"
-                f"  Actual: {actual_rows:,} rows\n"
-                f"  Difference: {difference:+,} rows ({percentage:.1f}% of expected)",
-            )
-
-            # Provide additional debugging info
-            if actual_rows < expected_rows:
-                click.echo("\nPossible causes:")
-                click.echo("  - Some batches may have failed during insert/import")
-                click.echo("  - The import job may still be in progress")
-                click.echo("  - Data files may have been corrupted or incomplete")
-            else:
-                click.echo("\nPossible causes:")
-                click.echo("  - Duplicate data may have been inserted")
-                click.echo("  - Multiple import operations may have been performed")
+        elif level == "full":
+            # Level 3: Full verification including all fields + query tests
+            click.echo("Running full field verification with query tests...")
+            results = verifier.verify_full_fields_with_queries()
+            if not all(results.values()):
+                failed_checks = [k for k, v in results.items() if not v]
+                display_error(f"Verification failed: {', '.join(failed_checks)}")
+                raise SystemExit(1)
 
     except Exception as e:
         log_error_with_context(

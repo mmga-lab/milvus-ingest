@@ -127,10 +127,21 @@ milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket m
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --drop-if-exists  # Drop and recreate
 
 # Verify data in Milvus
-# Note: Compares the row count in Milvus with the original count from meta.json
-milvus-ingest to-milvus verify ./output                                # Verify using collection name from meta.json
-milvus-ingest to-milvus verify ./output --collection-name my_collection # Verify specific collection
-milvus-ingest to-milvus verify ./output --uri http://192.168.1.100:19530 --token your-token  # Verify on remote Milvus
+# Comprehensive verification system with three levels (all include query/search correctness tests)
+
+# Level 1: Row count + query tests (default, fastest)
+milvus-ingest to-milvus verify ./output                                # Row count + query correctness
+milvus-ingest to-milvus verify ./output --level count                  # Explicit level specification
+
+# Level 2: Scalar fields + query tests (excludes vectors for performance)
+milvus-ingest to-milvus verify ./output --level scalar                 # Verify scalar fields + queries
+
+# Level 3: All fields + query tests (includes vectors, most comprehensive)
+milvus-ingest to-milvus verify ./output --level full                   # Full field verification + queries
+
+# Additional verification options
+milvus-ingest to-milvus verify ./output --level full --collection-name my_collection  # Specific collection
+milvus-ingest to-milvus verify ./output --level scalar --uri http://remote:19530 --token your-token  # Remote Milvus
 ```
 
 ## Architecture Overview
@@ -181,9 +192,49 @@ This is a high-performance mock data generator for Milvus vector databases with 
 
 6. **CLI Architecture**: Click-based command groups (generate, schema, upload, to-milvus, clean) with rich terminal output for better user experience.
 
-7. **Milvus Integration**: Complete integration with Milvus including collection creation, partition/shard configuration, direct insertion, bulk import from S3/MinIO storage, and data verification.
+7. **Milvus Integration**: Complete integration with Milvus including collection creation, partition/shard configuration, direct insertion, bulk import from S3/MinIO storage, and comprehensive data verification.
+
+8. **Comprehensive Verification System**: Multi-level verification system that ensures data integrity, field consistency, and functional correctness through automated query and search testing.
 
 ## Key Implementation Details
+
+### Verification System Architecture
+The verification system provides three progressive levels of data validation:
+
+#### Level 1: Count + Query Tests (Default)
+- **Row Count Verification**: Compares total rows in Milvus collection with expected count from meta.json
+- **Query Correctness Tests**: Executes 1000 sample exact queries to verify data retrieval functionality 
+- **Vector Search Tests**: Performs 1000 sample vector similarity searches to verify search functionality
+- **Use Case**: Quick verification of data import success and basic functionality
+- **Performance**: Fastest option, minimal resource usage
+
+#### Level 2: Scalar + Query Tests  
+- **Row Count Verification**: Same as Level 1
+- **Scalar Field Validation**: Compares scalar field values between source data and Milvus (excludes vectors)
+- **AUTO_ID Handling**: Intelligently skips auto-generated primary key fields  
+- **Query Correctness Tests**: Same as Level 1
+- **Vector Search Tests**: Same as Level 1
+- **Use Case**: Business data accuracy verification with performance optimization
+- **Performance**: Moderate resource usage, skips compute-intensive vector comparisons
+
+#### Level 3: Full + Query Tests
+- **Row Count Verification**: Same as Level 1
+- **All Field Validation**: Compares ALL field values including vector fields between source and Milvus
+- **Vector Field Precision**: Uses numpy.allclose() for floating-point vector comparison with 1e-6 tolerance
+- **Query Correctness Tests**: Same as Level 1  
+- **Vector Search Tests**: Same as Level 1
+- **Use Case**: Complete data quality assurance and comprehensive validation
+- **Performance**: Most resource-intensive, includes vector field comparisons
+
+#### Verification Features
+- **Smart Primary Key Detection**: Supports both `is_primary` and `is_primary_key` field attributes
+- **Index-based Comparison**: For AUTO_ID scenarios, uses row index matching instead of primary key lookup
+- **Data Type Handling**: Specialized comparison logic for vectors, floats, strings, JSON, and arrays
+- **Error Tolerance**: Allows up to 5% field mismatch rate for floating-point precision differences
+- **Rich Output**: Detailed verification tables and summary reports with pass/fail status
+- **Query Testing**: Each level includes 1000-sample query correctness validation
+  - Exact queries: 95% success rate threshold
+  - Vector searches: 80% success rate threshold (accounts for approximate search nature)
 
 ### Parameter Naming Convention
 The CLI uses consistent parameter naming after recent updates:
