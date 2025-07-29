@@ -744,17 +744,31 @@ class MilvusVerifier:
         exact_query_passed = self._test_exact_queries(sample_size // 2)
         all_passed = all_passed and exact_query_passed
 
-        # Test vector search if vector fields exist
+        # Test vector search for all testable vector fields
         vector_fields = [
             f for f in self.schema.get("fields", []) if "Vector" in f["type"]
         ]
-        if vector_fields:
-            vector_search_passed = self._test_vector_search(
-                vector_fields[0], sample_size // 2
-            )
+        testable_vector_fields = [
+            f for f in vector_fields if not self._is_function_output_field(f["name"])
+        ]
+
+        if testable_vector_fields:
+            vector_search_passed = True
+            for vector_field in testable_vector_fields:
+                field_test_passed = self._test_vector_search(
+                    vector_field, sample_size // 2
+                )
+                vector_search_passed = vector_search_passed and field_test_passed
             all_passed = all_passed and vector_search_passed
         else:
-            display_info("No vector fields found, skipping vector search verification")
+            if vector_fields:
+                display_info(
+                    "All vector fields are function outputs, skipping vector search verification"
+                )
+            else:
+                display_info(
+                    "No vector fields found, skipping vector search verification"
+                )
 
         return all_passed
 
@@ -829,13 +843,7 @@ class MilvusVerifier:
             display_info("No primary key field found, skipping vector search test")
             return False
 
-        # Check if this is a function output field that cannot be retrieved
-        is_function_output = self._is_function_output_field(field_name)
-        if is_function_output:
-            display_info(
-                f"Skipping vector search test for function output field '{field_name}' (cannot retrieve raw data)"
-            )
-            return True  # Consider it passed since function output fields can't be tested this way
+        # Note: Function output field check is now done at the caller level
 
         # Sample some vectors with their primary keys
         try:
