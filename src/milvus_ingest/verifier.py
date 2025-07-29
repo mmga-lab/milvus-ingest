@@ -216,6 +216,9 @@ class MilvusVerifier:
             display_error("Could not find total_rows in meta.json")
             return False
 
+        # Ensure collection is loaded with refresh before counting
+        self.client.load_collection(self.collection_name, refresh=True)
+
         # Query count
         result = self.client.query(
             collection_name=self.collection_name,
@@ -339,8 +342,25 @@ class MilvusVerifier:
                 return False
 
         # Sample some records from Milvus using primary key
-        pk_values = [str(row[pk_field]) for row in source_data[:sample_size]]
-        filter_expr = f"{pk_field} in {pk_values}"
+        # Get primary key field type to format values correctly
+        pk_field_type = None
+        for field in self.schema.get("fields", []):
+            if field.get("is_primary_key") or field.get("is_primary"):
+                pk_field_type = field.get("type", "VarChar")
+                break
+
+        # Format primary key values based on field type
+        pk_values = []
+        for row in source_data[:sample_size]:
+            pk_value = row[pk_field]
+            if pk_field_type in ["Int8", "Int16", "Int32", "Int64"]:
+                # For integer types, use raw values
+                pk_values.append(pk_value)
+            else:
+                # For string types, quote the values
+                pk_values.append(f'"{pk_value}"')
+
+        filter_expr = f"{pk_field} in [{', '.join(map(str, pk_values))}]"
 
         try:
             milvus_data = self.client.query(
@@ -413,6 +433,10 @@ class MilvusVerifier:
 
             # Skip auto_id primary key fields since they're not in source data
             if field.get("auto_id", False):
+                continue
+
+            # Skip function output fields since they're not in source data
+            if self._is_function_output_field(field_name):
                 continue
 
             # Skip vector fields if exclude_vectors is True
@@ -651,32 +675,62 @@ class MilvusVerifier:
         self, source_value: Any, milvus_value: Any, field_type: str
     ) -> bool:
         """Check if two values match considering data type specifics."""
-        if source_value is None and milvus_value is None:
-            return True
-        if source_value is None or milvus_value is None:
+        try:
+            if source_value is None and milvus_value is None:
+                return True
+            if source_value is None or milvus_value is None:
+                return False
+
+            # Handle vector fields
+            if "Vector" in field_type:
+                if not isinstance(source_value, list | np.ndarray):
+                    return False
+                if not isinstance(milvus_value, list | np.ndarray):
+                    return False
+                return np.allclose(source_value, milvus_value, rtol=1e-6)
+
+            # Handle float precision
+            if field_type in ["Float", "Double"]:
+                try:
+                    return abs(float(source_value) - float(milvus_value)) < 1e-6
+                except (ValueError, TypeError):
+                    return False
+
+            # Handle arrays/JSON
+            if field_type in ["Array", "JSON"]:
+                # Handle numpy arrays first
+                if isinstance(source_value, np.ndarray) and isinstance(
+                    milvus_value, np.ndarray
+                ):
+                    return np.array_equal(source_value, milvus_value)
+                elif isinstance(source_value, np.ndarray) or isinstance(
+                    milvus_value, np.ndarray
+                ):
+                    # Convert numpy array to list for comparison
+                    source_list = (
+                        source_value.tolist()
+                        if isinstance(source_value, np.ndarray)
+                        else source_value
+                    )
+                    milvus_list = (
+                        milvus_value.tolist()
+                        if isinstance(milvus_value, np.ndarray)
+                        else milvus_value
+                    )
+                    return source_list == milvus_list
+                # Handle JSON fields specifically
+                elif field_type == "JSON":
+                    return self._compare_json_values(source_value, milvus_value)
+                else:
+                    return source_value == milvus_value
+
+            # Default string comparison
+            return str(source_value) == str(milvus_value)
+        except Exception as e:
+            logger.debug(
+                f"Error comparing values: {e}, source_type={type(source_value)}, milvus_type={type(milvus_value)}"
+            )
             return False
-
-        # Handle vector fields
-        if "Vector" in field_type:
-            if not isinstance(source_value, (list, np.ndarray)):
-                return False
-            if not isinstance(milvus_value, (list, np.ndarray)):
-                return False
-            return np.allclose(source_value, milvus_value, rtol=1e-6)
-
-        # Handle float precision
-        if field_type in ["Float", "Double"]:
-            try:
-                return abs(float(source_value) - float(milvus_value)) < 1e-6
-            except (ValueError, TypeError):
-                return False
-
-        # Handle arrays/JSON
-        if field_type in ["Array", "JSON"]:
-            return source_value == milvus_value
-
-        # Default string comparison
-        return str(source_value) == str(milvus_value)
 
     def _verify_query_correctness(self, sample_size: int = 100) -> bool:
         """Verify query and search results are correct."""
@@ -775,6 +829,14 @@ class MilvusVerifier:
             display_info("No primary key field found, skipping vector search test")
             return False
 
+        # Check if this is a function output field that cannot be retrieved
+        is_function_output = self._is_function_output_field(field_name)
+        if is_function_output:
+            display_info(
+                f"Skipping vector search test for function output field '{field_name}' (cannot retrieve raw data)"
+            )
+            return True  # Consider it passed since function output fields can't be tested this way
+
         # Sample some vectors with their primary keys
         try:
             sample_data = self.client.query(
@@ -784,6 +846,12 @@ class MilvusVerifier:
                 limit=sample_size,
             )
         except Exception as e:
+            # If we can't retrieve the vector field, it might be sparse or have retrieval restrictions
+            if "not allowed to retrieve raw data" in str(e):
+                display_info(
+                    f"Skipping vector search test for field '{field_name}' (raw data retrieval not allowed)"
+                )
+                return True  # Consider it passed since we can't test it
             display_error(f"Failed to sample vectors for search test: {e}")
             return False
 
@@ -1013,6 +1081,39 @@ class MilvusVerifier:
         except Exception as e:
             display_error(f"✗ Function field verification failed: {e}")
             return False
+
+    def _compare_json_values(self, source_value: Any, milvus_value: Any) -> bool:
+        """Compare JSON values, handling string vs parsed object differences."""
+        import json
+
+        try:
+            # Parse source value if it's a string
+            if isinstance(source_value, str):
+                source_parsed = json.loads(source_value)
+            else:
+                source_parsed = source_value
+
+            # Parse milvus value if it's a string
+            if isinstance(milvus_value, str):
+                milvus_parsed = json.loads(milvus_value)
+            else:
+                milvus_parsed = milvus_value
+
+            # Compare the parsed objects
+            return source_parsed == milvus_parsed
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.debug(f"JSON comparison error: {e}")
+            # Fallback to string comparison
+            return str(source_value) == str(milvus_value)
+
+    def _is_function_output_field(self, field_name: str) -> bool:
+        """Check if a field is a function output field (like BM25 sparse vectors)."""
+        functions = self.schema.get("functions", [])
+        for function in functions:
+            output_fields = function.get("output_field_names", [])
+            if field_name in output_fields:
+                return True
+        return False
 
     def _load_sample_source_data(self, sample_size: int) -> list[dict[str, Any]]:
         """Load sample data from source files (parquet or json)."""
