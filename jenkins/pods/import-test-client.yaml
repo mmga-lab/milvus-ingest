@@ -14,10 +14,10 @@ spec:
     resources:
       limits:
         memory: 64Gi
-        cpu: "16.0"
+        cpu: "8.0"
       requests:
         memory: 64Gi
-        cpu: "8.0"
+        cpu: "4.0"
     volumeMounts:
     - name: db-data-path
       mountPath: /root/milvus_ingest_data
