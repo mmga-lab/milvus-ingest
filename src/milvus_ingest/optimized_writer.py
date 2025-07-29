@@ -1650,13 +1650,14 @@ def _generate_scalar_field_data(
     field_type = field["type"]
 
     # Handle primary key generation - ensure global uniqueness
-    if (
-        field.get("is_primary", False)
-        and field_type == "Int64"
-        and not field.get("auto_id", False)
-    ):
-        # Generate consecutive unique primary keys starting from pk_offset + 1
-        return np.arange(pk_offset + 1, pk_offset + num_rows + 1, dtype=np.int64)
+    if field.get("is_primary", False) and not field.get("auto_id", False):
+        if field_type == "Int64":
+            # Generate consecutive unique primary keys starting from pk_offset + 1
+            return np.arange(pk_offset + 1, pk_offset + num_rows + 1, dtype=np.int64)
+        elif field_type == "VarChar":
+            # Generate unique VarChar primary keys using UUID
+            import uuid
+            return [str(uuid.uuid4()) for _ in range(num_rows)]
 
     # Check if field is nullable (null probability from legacy generator)
     is_nullable = field.get("nullable", False)
