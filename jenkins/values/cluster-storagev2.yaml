@@ -1,0 +1,75 @@
+cluster:
+  enabled: true
+log:
+  level: debug
+image:
+  all:
+    repository: milvusdb/milvus
+    tag: master-latest
+    pullPolicy: IfNotPresent
+
+streaming:
+  enabled: true
+
+indexNode:
+  resources:
+    requests:
+      cpu: 2
+    limits:
+      cpu: 16
+      memory: 32Gi
+
+streamingNode:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 2
+      memory: 8Gi
+    limits:
+      cpu: 4
+      memory: 16Gi
+
+
+dataNode:
+  resources:
+    requests:
+      cpu: 2
+    limits:
+      cpu: 16
+      memory: 32Gi
+
+queryNode:
+  resources:
+    requests:
+      cpu: 2
+    limits:
+      cpu: 16
+      memory: 32Gi
+
+
+kafka:
+  enabled: true
+
+pulsarv3:
+  enabled: false
+
+pulsar:
+  enabled: false
+
+extraConfigFiles:
+  user.yaml: |+
+    common:
+      storage:
+        enablev2: true
+    queryNode:
+      mmap:
+        vectorField: true
+        vectorIndex: true
+        scalarField: true
+        scalarIndex: true
+        growingMmapEnabled: true
+    trace:
+      exporter: jaeger
+      sampleFraction: 1
+      jaeger:
+        url: http://tempo-distributor.tempo:14268/api/traces
