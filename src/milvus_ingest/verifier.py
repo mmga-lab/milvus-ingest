@@ -774,11 +774,13 @@ class MilvusVerifier:
 
     def _test_exact_queries(self, sample_size: int) -> bool:
         """Test exact queries return expected results."""
-        # Get primary key field
+        # Get primary key field and its type
         pk_field = None
+        pk_field_type = None
         for field in self.schema.get("fields", []):
             if field.get("is_primary_key") or field.get("is_primary"):
                 pk_field = field["name"]
+                pk_field_type = field.get("type", "VarChar")
                 break
 
         if not pk_field:
@@ -801,10 +803,19 @@ class MilvusVerifier:
         passed = 0
         for row in sample_data:
             pk_value = row[pk_field]
+
+            # Format the primary key value based on field type for the filter
+            if pk_field_type in ["Int8", "Int16", "Int32", "Int64"]:
+                # For integer types, use raw values
+                filter_pk_value = str(pk_value)
+            else:
+                # For string types, quote the values
+                filter_pk_value = f'"{pk_value}"'
+
             try:
                 query_result = self.client.query(
                     collection_name=self.collection_name,
-                    filter=f"{pk_field} == {pk_value}",
+                    filter=f"{pk_field} == {filter_pk_value}",
                     output_fields=[pk_field],
                 )
                 if len(query_result) == 1 and query_result[0][pk_field] == pk_value:
