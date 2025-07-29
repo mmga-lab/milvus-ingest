@@ -11,13 +11,6 @@ image:
 streaming:
   enabled: true
 
-indexNode:
-  resources:
-    requests:
-      cpu: 2
-    limits:
-      cpu: 16
-      memory: 32Gi
 
 streamingNode:
   replicas: 2
