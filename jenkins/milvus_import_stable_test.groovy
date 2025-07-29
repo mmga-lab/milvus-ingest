@@ -37,11 +37,6 @@ pipeline {
             defaultValue: '3'
         )
         string(
-            description: 'IndexNode Nums',
-            name: 'indexnode_nums',
-            defaultValue: '3'
-        )
-        string(
             description: 'Proxy Nums',
             name: 'proxy_nums',
             defaultValue: '1'
@@ -156,7 +151,6 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         # Update node replicas
                         yq -i '.queryNode.replicas = "${params.querynode_nums}"' values.yaml
                         yq -i '.dataNode.replicas = "${params.datanode_nums}"' values.yaml
-                        yq -i '.indexNode.replicas = "${params.indexnode_nums}"' values.yaml
                         yq -i '.proxy.replicas = "${params.proxy_nums}"' values.yaml
                         
                         echo "Final values configuration:"
