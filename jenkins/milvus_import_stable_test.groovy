@@ -123,10 +123,36 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 container('main') {
                     script {
                         sh "pip install pdm"
+                        sh "pip install uv"
                     }
                 }
             }
         }
+        stage('Install milvus-ingest') {
+            steps {
+                container('main') {
+                    script {
+                        sh """
+                        # Install PDM if not available
+                        which pdm || pip install pdm
+                        
+                        # Use Python 3.10 specifically
+                        pdm use python3.10
+                        pdm config use_uv true
+                        
+                        # Install milvus-ingest from current workspace
+                        # Fix lockfile if needed
+                        # pdm lock --update-reuse || true
+                        rm -rf pdm.lock
+                        pdm install
+                        
+                        # Verify installation
+                        pdm run milvus-ingest --help
+                        """
+                    }
+                }
+            }
+        }        
 
         stage('Prepare Milvus Values') {
             steps {
@@ -216,29 +242,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             }
         }
 
-        stage('Install milvus-ingest') {
-            steps {
-                container('main') {
-                    script {
-                        sh """
-                        # Install PDM if not available
-                        which pdm || pip install pdm
-                        
-                        # Use Python 3.10 specifically
-                        pdm use python3.10
-                        
-                        # Install milvus-ingest from current workspace
-                        # Fix lockfile if needed
-                        pdm lock --update-reuse || true
-                        pdm install
-                        
-                        # Verify installation
-                        pdm run milvus-ingest --help
-                        """
-                    }
-                }
-            }
-        }
+
         
         stage('Generate Test Data') {
             options {
