@@ -13,7 +13,7 @@ spec:
     tty: true
     resources:
       limits:
-        memory: 64Gi
+        memory: 128Gi
         cpu: "8.0"
       requests:
         memory: 64Gi
