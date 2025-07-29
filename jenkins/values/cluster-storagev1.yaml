@@ -22,6 +22,9 @@ streamingNode:
       cpu: 4
       memory: 16Gi
 
+indexNode:
+  enabled: false
+
 
 dataNode:
   resources:
