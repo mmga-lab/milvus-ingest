@@ -475,6 +475,7 @@ class MilvusVerifier:
         """Verify field values using primary key-based comparison."""
         mismatches = 0
         total_compared = 0
+        mismatch_examples: list[dict[str, str]] = []
 
         for source_row in source_data:
             pk_value = str(source_row[pk_field])
@@ -489,10 +490,17 @@ class MilvusVerifier:
             # Handle different data type comparisons
             if not self._values_match(source_value, milvus_value, field_type):
                 mismatches += 1
-                if mismatches <= 5:  # Log first few mismatches
-                    logger.debug(
-                        f"Field {field_name} mismatch for PK {pk_value}: source={source_value}, "
-                        f"milvus={milvus_value}"
+                if len(mismatch_examples) < 5:  # Collect first few mismatches
+                    mismatch_examples.append(
+                        {
+                            "pk": pk_value,
+                            "source": self._format_value_for_display(
+                                source_value, field_type
+                            ),
+                            "milvus": self._format_value_for_display(
+                                milvus_value, field_type
+                            ),
+                        }
                     )
 
             total_compared += 1
@@ -506,6 +514,14 @@ class MilvusVerifier:
                 f"Field {field_name}: {mismatches}/{total_compared} mismatches "
                 f"({mismatch_rate:.1%})"
             )
+
+            # Display mismatch examples
+            if mismatch_examples:
+                logger.info(f"Sample mismatches for field '{field_name}':")
+                for i, example in enumerate(mismatch_examples, 1):
+                    logger.info(f"  {i}. PK={example['pk']}:")
+                    logger.info(f"     Source: {example['source']}")
+                    logger.info(f"     Milvus: {example['milvus']}")
 
         return success
 
@@ -637,6 +653,7 @@ class MilvusVerifier:
         """Verify field values using index-based comparison for AUTO_ID scenarios."""
         mismatches = 0
         total_compared = 0
+        mismatch_examples: list[dict[str, str | int]] = []
 
         for i in range(sample_count):
             source_row = source_lookup.get(i)
@@ -651,10 +668,17 @@ class MilvusVerifier:
             # Handle different data type comparisons
             if not self._values_match(source_value, milvus_value, field_type):
                 mismatches += 1
-                if mismatches <= 5:  # Log first few mismatches
-                    logger.debug(
-                        f"Field {field_name} mismatch at index {i}: source={source_value}, "
-                        f"milvus={milvus_value}"
+                if len(mismatch_examples) < 5:  # Collect first few mismatches
+                    mismatch_examples.append(
+                        {
+                            "index": i,
+                            "source": self._format_value_for_display(
+                                source_value, field_type
+                            ),
+                            "milvus": self._format_value_for_display(
+                                milvus_value, field_type
+                            ),
+                        }
                     )
 
             total_compared += 1
@@ -669,7 +693,54 @@ class MilvusVerifier:
                 f"({mismatch_rate:.1%})"
             )
 
+            # Display mismatch examples
+            if mismatch_examples:
+                logger.info(f"Sample mismatches for field '{field_name}':")
+                for i, example in enumerate(mismatch_examples, 1):
+                    logger.info(f"  {i}. Index={example['index']}:")
+                    logger.info(f"     Source: {example['source']}")
+                    logger.info(f"     Milvus: {example['milvus']}")
+
         return success
+
+    def _format_value_for_display(self, value: Any, field_type: str) -> str:
+        """Format value for display in mismatch examples."""
+        if value is None:
+            return "None"
+
+        if "Vector" in field_type:
+            if isinstance(value, list | np.ndarray):
+                arr = np.array(value)
+                if len(arr) > 5:
+                    return f"[{arr[0]:.4f}, {arr[1]:.4f}, ..., {arr[-1]:.4f}] (dim={len(arr)})"
+                else:
+                    return str(arr.tolist())
+            return str(value)
+
+        if field_type in ["Array"]:
+            if isinstance(value, list | np.ndarray):
+                if len(value) > 3:
+                    return f"{value[:3]}... (len={len(value)})"
+                return str(value)
+            return str(value)
+
+        if field_type == "JSON":
+            if isinstance(value, dict):
+                import json
+
+                s = json.dumps(value, ensure_ascii=False)
+                if len(s) > 100:
+                    return s[:100] + "..."
+                return s
+            return str(value)
+
+        if field_type in ["Float", "Double"] and isinstance(value, int | float):
+            return f"{value:.6f}"
+
+        if isinstance(value, str) and len(value) > 100:
+            return value[:100] + "..."
+
+        return str(value)
 
     def _values_match(
         self, source_value: Any, milvus_value: Any, field_type: str
