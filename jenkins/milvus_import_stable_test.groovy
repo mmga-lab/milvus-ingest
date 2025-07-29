@@ -128,7 +128,6 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 container('main') {
                     script {
                         sh "pip install pdm"
-                        sh "pip install yq"
                     }
                 }
             }
