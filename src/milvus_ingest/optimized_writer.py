@@ -1,12 +1,12 @@
 """Simplified optimized writer focusing on core performance improvements."""
 
 import json
+import multiprocessing
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -90,6 +90,61 @@ def _parse_file_size(size_str: str) -> int:
             raise ValueError(
                 f"Invalid file size format: {size_str}. Use formats like '10GB', '200MB', or '256' (MB)"
             )
+
+
+def adjust_workers_by_file_size(num_workers: int, file_size_bytes: int) -> int:
+    """
+    Adjust number of workers based on file size to prevent memory issues.
+
+    Rules:
+    - < 1GB: Use current worker count (already determined)
+    - 2-5GB: Maximum 2 workers
+    - > 5GB: Maximum 1 worker
+
+    Args:
+        num_workers: Current worker count (already processed, not None)
+        file_size_bytes: Estimated file size in bytes
+
+    Returns:
+        Adjusted number of workers
+    """
+    file_size_gb = file_size_bytes / (1024**3)
+
+    # num_workers is already processed in generate_data_optimized, so it's never None
+    initial_workers = num_workers
+
+    # Apply size-based limits
+    if file_size_gb < 1:
+        # < 1GB: Use current worker count
+        adjusted_workers = initial_workers
+    elif file_size_gb <= 5:
+        # 2-5GB: Maximum 2 workers
+        adjusted_workers = min(initial_workers, 2)
+    else:
+        # > 5GB: Maximum 1 worker
+        adjusted_workers = 1
+
+    # Log adjustment if changed
+    if adjusted_workers != initial_workers:
+        logger.info(
+            f"Adjusted workers from {initial_workers} to {adjusted_workers} "
+            f"due to file size ({file_size_gb:.1f}GB)"
+        )
+
+        # Add warning for large files
+        if file_size_gb >= 5:
+            logger.warning(
+                f"Large file detected ({file_size_gb:.1f}GB). "
+                f"Using single worker to prevent memory issues. "
+                f"Consider using smaller --file-size for better parallelism."
+            )
+        elif file_size_gb >= 2:
+            logger.info(
+                f"Medium file size ({file_size_gb:.1f}GB). "
+                f"Limited to 2 workers for memory safety."
+            )
+
+    return adjusted_workers
 
 
 def _generate_partition_key_with_cardinality(
@@ -816,7 +871,6 @@ def _generate_files_parallel(
     Generate multiple files in parallel using ProcessPoolExecutor.
     """
     import threading
-    from collections import defaultdict
 
     # Prepare file generation tasks
     file_tasks = []
@@ -1461,7 +1515,7 @@ def _enhanced_estimate_row_size_from_sample(
         "adjustment_reason": adjustment_reason,
     }
 
-    logger.info(f"📈 Estimation results:")
+    logger.info("📈 Estimation results:")
     logger.info(f"   Mean: {mean_size:.2f} bytes/row (±{std_size:.2f})")
     logger.info(f"   Range: {min_size:.2f} - {max_size:.2f}")
     logger.info(f"   CV: {cv:.1%}, Confidence: {confidence}")
@@ -1657,6 +1711,7 @@ def _generate_scalar_field_data(
         elif field_type == "VarChar":
             # Generate unique VarChar primary keys using UUID
             import uuid
+
             return [str(uuid.uuid4()) for _ in range(num_rows)]
 
     # Check if field is nullable (null probability from legacy generator)
@@ -2007,7 +2062,7 @@ def generate_data_optimized(
 
         # Use enhanced estimation with multiple sampling
         sample_size = min(max(1000, total_rows // 50), 10000)
-        logger.info(f"Using enhanced estimation for file size control...")
+        logger.info("Using enhanced estimation for file size control...")
 
         actual_row_size_bytes, estimation_stats = (
             _enhanced_estimate_row_size_from_sample(
@@ -2037,7 +2092,7 @@ def generate_data_optimized(
         )
 
         sample_size = min(max(1000, rows // 50), 10000)
-        logger.info(f"Using enhanced estimation for file count mode...")
+        logger.info("Using enhanced estimation for file count mode...")
 
         actual_row_size_bytes, estimation_stats = (
             _enhanced_estimate_row_size_from_sample(
@@ -2058,7 +2113,7 @@ def generate_data_optimized(
         logger.info("Using file-size mode: calculating number of files needed")
 
         sample_size = min(max(1000, rows // 50), 10000)
-        logger.info(f"Using enhanced estimation for file size mode...")
+        logger.info("Using enhanced estimation for file size mode...")
 
         actual_row_size_bytes, estimation_stats = (
             _enhanced_estimate_row_size_from_sample(
@@ -2085,7 +2140,7 @@ def generate_data_optimized(
 
         # Use enhanced estimation for default mode
         sample_size = min(max(1000, rows // 50), 10000)
-        logger.info(f"Using enhanced estimation for default mode...")
+        logger.info("Using enhanced estimation for default mode...")
 
         actual_row_size_bytes, estimation_stats = (
             _enhanced_estimate_row_size_from_sample(
@@ -2115,6 +2170,19 @@ def generate_data_optimized(
     total_files = max(
         1, (rows + effective_max_rows_per_file - 1) // effective_max_rows_per_file
     )
+
+    # Adjust worker count based on estimated file size
+    if estimation_stats.get("method") != "none":
+        # Use the estimated row size from the sampling
+        estimated_file_size_bytes = effective_max_rows_per_file * actual_row_size_bytes
+        num_workers = adjust_workers_by_file_size(
+            num_workers, estimated_file_size_bytes
+        )
+
+        logger.info(
+            f"File size estimation: ~{estimated_file_size_bytes / (1024**3):.1f}GB per file, "
+            f"using {num_workers} worker(s)"
+        )
 
     # Decide whether to use parallel or serial generation
     use_parallel = num_workers > 1 and total_files > 1
