@@ -8,9 +8,9 @@ pipeline {
     }
     agent {
         kubernetes {
-            inheritFrom 'default'
+            cloud '4am'
             defaultContainer 'main'
-            yamlFile "jenkins/pods/import-test-client.yaml"
+            yamlFile 'jenkins/pods/import-test-client.yaml'
             customWorkspace '/home/jenkins/agent/workspace'
             idleMinutes 5
         }
