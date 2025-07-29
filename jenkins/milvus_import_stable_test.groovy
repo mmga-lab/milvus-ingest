@@ -154,10 +154,10 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         cd /tmp/milvus-values
                         
                         # Update node replicas
-                        yq -i '.queryNode.replicas = ${params.querynode_nums}"' values.yaml
-                        yq -i '.dataNode.replicas = ${params.datanode_nums}"' values.yaml
-                        yq -i '.indexNode.replicas = ${params.indexnode_nums}"' values.yaml
-                        yq -i '.proxy.replicas = ${params.proxy_nums}"' values.yaml
+                        yq -i '.queryNode.replicas = "${params.querynode_nums}"' values.yaml
+                        yq -i '.dataNode.replicas = "${params.datanode_nums}"' values.yaml
+                        yq -i '.indexNode.replicas = "${params.indexnode_nums}"' values.yaml
+                        yq -i '.proxy.replicas = "${params.proxy_nums}"' values.yaml
                         
                         echo "Final values configuration:"
                         cat values.yaml
