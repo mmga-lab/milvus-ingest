@@ -16,7 +16,7 @@ spec:
         memory: 64Gi
         cpu: "16.0"
       requests:
-        memory: 32Gi
+        memory: 64Gi
         cpu: "8.0"
     volumeMounts:
     - name: db-data-path
