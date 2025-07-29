@@ -133,6 +133,9 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 container('main') {
                     script {
                         sh """
+                        # Set UV cache directory to use NFS mounted path
+                        export UV_CACHE_DIR=/tmp/.uv-cache
+                        
                         # Install PDM if not available
                         which pdm || pip install pdm
                         

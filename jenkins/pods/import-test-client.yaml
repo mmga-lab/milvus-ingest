@@ -24,6 +24,9 @@ spec:
     - name: kubeconfig
       mountPath: /root/.kube/config
       subPath: config
+    - name: package-cache
+      mountPath: /tmp/.uv-cache
+      subPath: uv-cache
   volumes:
   - name: kubeconfig
     configMap:
@@ -33,3 +36,7 @@ spec:
     nfs:
       server: 172.16.70.249
       path: /volume1/test/milvus_ingest_data
+  - name: package-cache
+    nfs:
+      server: 172.16.70.249
+      path: /volume1/test/jenkins_cache
