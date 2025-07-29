@@ -371,13 +371,9 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                     kubectl describe pods -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} > k8s_log/${env.RELEASE_NAME}/pod-descriptions.txt || true
                     """
 
-                    // Archive test data and logs
-                    sh "mkdir -p ${env.ARTIFACTS}"
-                    sh "cp -r ${env.DATA_PATH} ${env.ARTIFACTS}/test_data_${env.BUILD_ID} || true"
-                    sh "tar -zcvf artifacts-${env.RELEASE_NAME}-test-data.tar.gz ${env.ARTIFACTS}/test_data_${env.BUILD_ID} --remove-files || true"
+                    // Archive logs
                     sh "tar -zcvf artifacts-${env.RELEASE_NAME}-server-logs.tar.gz k8s_log/ --remove-files || true"
 
-                    archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-test-data.tar.gz", allowEmptyArchive: true
                     archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-server-logs.tar.gz", allowEmptyArchive: true
 
                     // Cleanup test data
