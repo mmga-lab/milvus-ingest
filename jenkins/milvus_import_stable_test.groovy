@@ -139,6 +139,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         # Use Python 3.10 specifically
                         pdm use python3.10
                         pdm config use_uv true
+                        pdm config pypi.url https://pypi.tuna.tsinghua.edu.cn/simple/
                         
                         # Install milvus-ingest from current workspace
                         # Fix lockfile if needed
