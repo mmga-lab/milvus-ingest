@@ -224,7 +224,16 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         # Install PDM if not available
                         which pdm || pip install pdm
                         
+                        # Configure PDM to use uv and Python 3.10
+                        pdm config use_uv true
+                        pdm config python.use_venv true
+                        
+                        # Use Python 3.10 specifically
+                        pdm use python3.10
+                        
                         # Install milvus-ingest from current workspace
+                        # Fix lockfile if needed
+                        pdm lock --update-reuse || true
                         pdm install
                         
                         # Verify installation
