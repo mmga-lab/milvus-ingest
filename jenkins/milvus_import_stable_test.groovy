@@ -234,19 +234,6 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             }
         }
 
-        stage('Wait for Milvus Stability') {
-            steps {
-                container('main') {
-                    script {
-                        echo "Waiting for Milvus to be fully ready..."
-                        sh "sleep 2m"
-                    }
-                }
-            }
-        }
-
-
-        
         stage('Generate Test Data') {
             options {
                 timeout(time: 120, unit: 'MINUTES')
