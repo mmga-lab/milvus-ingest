@@ -86,7 +86,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         string(
             description: 'File Size (e.g., 10GB, 200MB)',
             name: 'file_size',
-            defaultValue: '10GB'
+            defaultValue: '200MB'
         )
         choice(
             description: 'File Format',
@@ -96,7 +96,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         choice(
             description: 'Storage Version',
             name: 'storage_version',
-            choices: ['V1', 'V2']
+            choices: ['V2', 'V1']
         )
         string(
             description: 'Partition Count',
