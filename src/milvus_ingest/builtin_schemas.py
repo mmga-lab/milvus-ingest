@@ -24,7 +24,12 @@ BUILTIN_SCHEMAS = {
     "dynamic_fields": {
         "name": "Dynamic Fields",
         "description": "Schema demonstrating dynamic field capabilities with VarChar auto_id for flexible data insertion",
-        "use_cases": ["Dynamic data", "Schema evolution", "Flexible fields", "VarChar auto ID demonstration"],
+        "use_cases": [
+            "Dynamic data",
+            "Schema evolution",
+            "Flexible fields",
+            "VarChar auto ID demonstration",
+        ],
         "fields_count": 4,
         "vector_dims": [384],
         "file": "dynamic_fields.json",

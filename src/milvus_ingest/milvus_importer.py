@@ -58,7 +58,6 @@ class MilvusBulkImporter:
             self.logger.error(f"Failed to connect to Milvus: {e}")
             raise
 
-
     def ensure_collection_exists(
         self,
         collection_name: str,

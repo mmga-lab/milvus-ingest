@@ -47,7 +47,7 @@ def mock_env_vars(monkeypatch, request):
     """Set up environment variables for testing."""
     # Get configuration from pytest options or use defaults
     config = request.config
-    
+
     test_env = {
         "MILVUS_URI": getattr(config.option, "uri", "http://localhost:19530"),
         "MILVUS_TOKEN": getattr(config.option, "token", ""),
@@ -245,12 +245,22 @@ def default_values_schema() -> dict[str, Any]:
 # Pytest configuration
 def pytest_addoption(parser):
     """Add custom command line options."""
-    parser.addoption("--uri", action="store", default="http://localhost:19530", help="Milvus URI")
+    parser.addoption(
+        "--uri", action="store", default="http://localhost:19530", help="Milvus URI"
+    )
     parser.addoption("--token", action="store", default="", help="Milvus token")
-    parser.addoption("--minio-host", action="store", default="localhost", help="MinIO host")
-    parser.addoption("--minio-ak", action="store", default="minioadmin", help="MinIO access key")
-    parser.addoption("--minio-sk", action="store", default="minioadmin", help="MinIO secret key")
-    parser.addoption("--minio-bucket", action="store", default="a-bucket", help="MinIO bucket name")
+    parser.addoption(
+        "--minio-host", action="store", default="localhost", help="MinIO host"
+    )
+    parser.addoption(
+        "--minio-ak", action="store", default="minioadmin", help="MinIO access key"
+    )
+    parser.addoption(
+        "--minio-sk", action="store", default="minioadmin", help="MinIO secret key"
+    )
+    parser.addoption(
+        "--minio-bucket", action="store", default="a-bucket", help="MinIO bucket name"
+    )
 
 
 def pytest_configure(config):
