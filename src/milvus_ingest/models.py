@@ -565,7 +565,10 @@ class CollectionSchema(BaseModel):
 
         # Validate auto_id constraint
         primary_field = primary_fields[0]
-        if primary_field.auto_id and primary_field.type not in {FieldType.INT64, FieldType.VARCHAR}:
+        if primary_field.auto_id and primary_field.type not in {
+            FieldType.INT64,
+            FieldType.VARCHAR,
+        }:
             raise ValueError(
                 f"Primary key field '{primary_field.name}' with auto_id=true must be of type Int64 or VarChar, not {primary_field.type}.\n"
                 "Change type to Int64/VarChar or set auto_id=false."

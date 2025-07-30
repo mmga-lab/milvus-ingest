@@ -115,14 +115,16 @@ class TestDataGeneration:
                 or f"Saved {expected_rows} rows" in result.output
             )
 
-            # Verify output directory structure  
+            # Verify output directory structure
             # Different schemas have different collection name patterns
             collection_map = {
                 "quickstart": "quickstart_example",
-                "ecommerce": "ecommerce_products"
+                "ecommerce": "ecommerce_products",
             }
             collection_name = collection_map.get(schema_name, f"{schema_name}_example")
-            expected_output_dir = Path.home() / ".milvus-ingest" / "data" / collection_name
+            expected_output_dir = (
+                Path.home() / ".milvus-ingest" / "data" / collection_name
+            )
             assert expected_output_dir.exists(), (
                 f"Output directory not found: {expected_output_dir}"
             )

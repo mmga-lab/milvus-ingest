@@ -17,7 +17,7 @@ class MilvusSchemaBuilder:
 
     def __init__(self, client: MilvusClient):
         """Initialize schema builder with Milvus client.
-        
+
         Args:
             client: MilvusClient instance
         """
@@ -26,10 +26,10 @@ class MilvusSchemaBuilder:
 
     def create_schema_from_metadata(self, metadata: dict[str, Any]) -> Any:
         """Create Milvus collection schema from metadata.
-        
+
         Args:
             metadata: Schema metadata containing field definitions and functions
-            
+
         Returns:
             Milvus schema object
         """
@@ -153,10 +153,10 @@ class MilvusSchemaBuilder:
 
     def create_index_params_from_metadata(self, metadata: dict[str, Any]) -> Any:
         """Create index parameters from metadata.
-        
+
         Args:
             metadata: Schema metadata containing field definitions
-            
+
         Returns:
             Milvus index parameters object
         """
@@ -200,12 +200,12 @@ class MilvusSchemaBuilder:
         drop_if_exists: bool = False,
     ) -> bool:
         """Create collection with schema from metadata.
-        
+
         Args:
             collection_name: Name of the collection to create
             metadata: Schema metadata
             drop_if_exists: Whether to drop existing collection
-            
+
         Returns:
             True if collection was created, False if it already existed
         """
@@ -247,11 +247,11 @@ class MilvusSchemaBuilder:
         self, collection_name: str, metadata: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get index information from metadata for return values.
-        
+
         Args:
             collection_name: Collection name
             metadata: Schema metadata
-            
+
         Returns:
             List of index information dictionaries
         """
@@ -289,11 +289,11 @@ class MilvusSchemaBuilder:
 
     def _convert_default_value(self, default_value: Any, field_type: str) -> Any:
         """Convert default value to correct type for Milvus schema.
-        
+
         Args:
             default_value: The default value to convert
             field_type: The field type
-            
+
         Returns:
             Converted default value
         """
@@ -343,10 +343,10 @@ class MilvusSchemaBuilder:
 
     def _get_milvus_datatype(self, field_type: str) -> DataType:
         """Map field type string to Milvus DataType.
-        
+
         Args:
             field_type: String representation of field type
-            
+
         Returns:
             Milvus DataType enum value
         """

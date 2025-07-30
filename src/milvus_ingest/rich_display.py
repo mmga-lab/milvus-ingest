@@ -293,15 +293,21 @@ def display_schema_preview(
     # Generation summary
     summary_items = []
     # Get rows value and format safely
-    rows_value = generation_config.get('total_rows', generation_config.get('rows', 'N/A'))
+    rows_value = generation_config.get(
+        "total_rows", generation_config.get("rows", "N/A")
+    )
     rows_display = f"{rows_value:,}" if isinstance(rows_value, int) else str(rows_value)
     summary_items.append(
         f"[bold]Rows to generate:[/bold] [green]{rows_display}[/green]"
     )
-    
+
     # Get batch size and format safely
-    batch_size_value = generation_config.get('batch_size', 'N/A')
-    batch_size_display = f"{batch_size_value:,}" if isinstance(batch_size_value, int) else str(batch_size_value)
+    batch_size_value = generation_config.get("batch_size", "N/A")
+    batch_size_display = (
+        f"{batch_size_value:,}"
+        if isinstance(batch_size_value, int)
+        else str(batch_size_value)
+    )
     summary_items.append(
         f"[bold]Batch size:[/bold] [yellow]{batch_size_display}[/yellow]"
     )

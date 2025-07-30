@@ -16,6 +16,9 @@ from rich.table import Table
 from .exceptions import MilvusIngestError
 from .rich_display import display_error, display_info, display_success
 
+# Milvus has a hard limit on query results
+MILVUS_QUERY_LIMIT = 16_384
+
 
 class MilvusVerifier:
     """Comprehensive verification system for Milvus collections."""
@@ -43,6 +46,48 @@ class MilvusVerifier:
 
         with open(meta_file) as f:
             return json.load(f)
+
+    def _batch_query(
+        self,
+        collection_name: str,
+        filter: str = "",
+        output_fields: list[str] | None = None,
+        total_limit: int = MILVUS_QUERY_LIMIT,
+    ) -> list[dict[str, Any]]:
+        """Query Milvus in batches to handle large result sets."""
+        if output_fields is None:
+            output_fields = ["*"]
+
+        results = []
+        offset = 0
+
+        while len(results) < total_limit:
+            batch_size = min(MILVUS_QUERY_LIMIT, total_limit - len(results))
+
+            try:
+                batch_results = self.client.query(
+                    collection_name=collection_name,
+                    filter=filter,
+                    output_fields=output_fields,
+                    offset=offset,
+                    limit=batch_size,
+                )
+
+                if not batch_results:
+                    break
+
+                results.extend(batch_results)
+                offset += len(batch_results)
+
+                # If we got less than requested, we've reached the end
+                if len(batch_results) < batch_size:
+                    break
+
+            except Exception as e:
+                logger.error(f"Batch query failed at offset {offset}: {e}")
+                raise
+
+        return results[:total_limit]
 
     def verify_count_with_queries(self, sample_size: int = 1000) -> dict[str, bool]:
         """Verify row count and run query tests (Level 1)."""
@@ -289,11 +334,12 @@ class MilvusVerifier:
         """Verify field values for AUTO_ID scenario using row index alignment."""
         try:
             # Query Milvus data in insertion order (no sorting to maintain order)
-            milvus_data = self.client.query(
+            query_limit = min(sample_size, len(source_data))
+            milvus_data = self._batch_query(
                 collection_name=self.collection_name,
                 filter="",  # Get all records
                 output_fields=["*"],
-                limit=min(sample_size, len(source_data)),
+                total_limit=query_limit,
             )
         except Exception as e:
             display_error(f"Failed to query Milvus data: {e}")
@@ -325,11 +371,12 @@ class MilvusVerifier:
             )
             # Fallback to index-based comparison
             try:
-                milvus_data = self.client.query(
+                query_limit = min(sample_size, len(source_data))
+                milvus_data = self._batch_query(
                     collection_name=self.collection_name,
                     filter="",
                     output_fields=["*"],
-                    limit=min(sample_size, len(source_data)),
+                    total_limit=query_limit,
                 )
                 sample_count = min(len(source_data), len(milvus_data))
                 milvus_lookup = {i: milvus_data[i] for i in range(sample_count)}
@@ -363,12 +410,38 @@ class MilvusVerifier:
         filter_expr = f"{pk_field} in [{', '.join(map(str, pk_values))}]"
 
         try:
-            milvus_data = self.client.query(
-                collection_name=self.collection_name,
-                filter=filter_expr,
-                output_fields=["*"],
-                limit=sample_size,
-            )
+            # For primary key queries, we expect exactly len(pk_values) results
+            # Use batch query to handle large pk_values lists
+            expected_results = len(pk_values)
+            if expected_results <= MILVUS_QUERY_LIMIT:
+                milvus_data = self.client.query(
+                    collection_name=self.collection_name,
+                    filter=filter_expr,
+                    output_fields=["*"],
+                    limit=MILVUS_QUERY_LIMIT,  # Use safe limit
+                )
+            else:
+                # For very large primary key lists, we need to batch the queries
+                # Split pk_values into chunks and query each chunk
+                milvus_data = []
+                chunk_size = (
+                    MILVUS_QUERY_LIMIT // 2
+                )  # Conservative chunk size to avoid filter expression limits
+
+                for i in range(0, len(pk_values), chunk_size):
+                    chunk_pk_values = pk_values[i : i + chunk_size]
+                    chunk_filter = (
+                        f"{pk_field} in [{', '.join(map(str, chunk_pk_values))}]"
+                    )
+
+                    chunk_results = self.client.query(
+                        collection_name=self.collection_name,
+                        filter=chunk_filter,
+                        output_fields=["*"],
+                        limit=MILVUS_QUERY_LIMIT,
+                    )
+                    milvus_data.extend(chunk_results)
+
         except Exception as e:
             display_error(f"Failed to query Milvus data: {e}")
             return False
@@ -555,11 +628,12 @@ class MilvusVerifier:
         filter_expr = f"{pk_field} in {pk_values}"
 
         try:
+            # Use safe limit for primary key based queries
             milvus_data = self.client.query(
                 collection_name=self.collection_name,
                 filter=filter_expr,
                 output_fields=["*"],
-                limit=sample_size,
+                limit=MILVUS_QUERY_LIMIT,
             )
         except Exception as e:
             display_error(f"Failed to query Milvus data: {e}")
@@ -860,11 +934,11 @@ class MilvusVerifier:
 
         # Sample some records
         try:
-            sample_data = self.client.query(
+            sample_data = self._batch_query(
                 collection_name=self.collection_name,
                 filter="",
                 output_fields=[pk_field],
-                limit=sample_size,
+                total_limit=sample_size,
             )
         except Exception as e:
             display_error(f"Failed to sample data for exact queries: {e}")
@@ -929,11 +1003,11 @@ class MilvusVerifier:
 
         # Sample some vectors with their primary keys
         try:
-            sample_data = self.client.query(
+            sample_data = self._batch_query(
                 collection_name=self.collection_name,
                 filter="",
                 output_fields=[field_name, pk_field],
-                limit=sample_size,
+                total_limit=sample_size,
             )
         except Exception as e:
             # If we can't retrieve the vector field, it might be sparse or have retrieval restrictions
@@ -1026,11 +1100,11 @@ class MilvusVerifier:
         try:
             # Sample data to check for null values
             output_fields = [f["name"] for f in nullable_fields]
-            sample_data = self.client.query(
+            sample_data = self._batch_query(
                 collection_name=self.collection_name,
                 filter="",
                 output_fields=output_fields,
-                limit=sample_size,
+                total_limit=sample_size,
             )
 
             # Check if nullable fields actually contain null values
