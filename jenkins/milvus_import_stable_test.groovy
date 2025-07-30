@@ -225,11 +225,11 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --set quotaAndLimits.enabled=false \\
                             -f values.yaml -n=${env.NAMESPACE}
                         """
-                        
+                        sh 'cat /tmp/milvus-values/values.yaml'
                         sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                         sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                         sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME}"
-                    }
+                    }   
                 }
             }
         }
