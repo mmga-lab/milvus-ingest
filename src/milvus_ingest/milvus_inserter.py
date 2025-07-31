@@ -67,6 +67,7 @@ class MilvusInserter:
         create_index: bool = True,
         batch_size: int = 10000,
         show_progress: bool = True,
+        use_flat_index: bool = True,
     ) -> dict[str, Any]:
         """Insert data from generated files to Milvus.
 
@@ -77,6 +78,7 @@ class MilvusInserter:
             create_index: Create index on vector fields after insert
             batch_size: Batch size for inserting data
             show_progress: Show progress bar
+            use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall but uses more memory)
 
         Returns:
             Dictionary with insert statistics
@@ -115,7 +117,7 @@ class MilvusInserter:
         if not collection_exists:
             # Use unified schema builder to create collection
             self.schema_builder.create_collection_with_schema(
-                final_collection_name, metadata, drop_if_exists=False
+                final_collection_name, metadata, drop_if_exists=False, use_flat_index=use_flat_index
             )
 
         # Find data files (parquet or json)
@@ -273,7 +275,7 @@ class MilvusInserter:
 
         # Get index info for return value
         index_info = self.schema_builder.get_index_info_from_metadata(
-            final_collection_name, metadata
+            final_collection_name, metadata, use_flat_index
         )
 
         return {
