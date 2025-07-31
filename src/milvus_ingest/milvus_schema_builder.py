@@ -151,11 +151,12 @@ class MilvusSchemaBuilder:
 
         return schema
 
-    def create_index_params_from_metadata(self, metadata: dict[str, Any]) -> Any:
+    def create_index_params_from_metadata(self, metadata: dict[str, Any], use_flat_index: bool = True) -> Any:
         """Create index parameters from metadata.
 
         Args:
             metadata: Schema metadata containing field definitions
+            use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall but uses more memory)
 
         Returns:
             Milvus index parameters object
@@ -187,9 +188,19 @@ class MilvusSchemaBuilder:
                     metric_type = "HAMMING" if field_type == "BinaryVector" else "L2"
 
                     # Add index for vector field
-                    index_params.add_index(
-                        field_name=field_name, metric_type=metric_type
-                    )
+                    # FLAT index only applies to dense vector fields (FloatVector, Float16Vector, BFloat16Vector)
+                    if use_flat_index and field_type in ["FloatVector", "Float16Vector", "BFloat16Vector"]:
+                        # Use FLAT index for dense vectors (100% recall accuracy)
+                        index_params.add_index(
+                            field_name=field_name,
+                            index_type="FLAT",
+                            metric_type=metric_type
+                        )
+                    else:
+                        # Use AUTOINDEX for BinaryVector and other types, or when FLAT is disabled
+                        index_params.add_index(
+                            field_name=field_name, metric_type=metric_type
+                        )
 
         return index_params
 
@@ -198,6 +209,7 @@ class MilvusSchemaBuilder:
         collection_name: str,
         metadata: dict[str, Any],
         drop_if_exists: bool = False,
+        use_flat_index: bool = True,
     ) -> bool:
         """Create collection with schema from metadata.
 
@@ -205,6 +217,7 @@ class MilvusSchemaBuilder:
             collection_name: Name of the collection to create
             metadata: Schema metadata
             drop_if_exists: Whether to drop existing collection
+            use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall)
 
         Returns:
             True if collection was created, False if it already existed
@@ -230,7 +243,7 @@ class MilvusSchemaBuilder:
             schema = self.create_schema_from_metadata(metadata)
 
             # Create index params
-            index_params = self.create_index_params_from_metadata(metadata)
+            index_params = self.create_index_params_from_metadata(metadata, use_flat_index)
 
             # Create collection
             self.client.create_collection(
@@ -244,13 +257,14 @@ class MilvusSchemaBuilder:
         return False
 
     def get_index_info_from_metadata(
-        self, collection_name: str, metadata: dict[str, Any]
+        self, collection_name: str, metadata: dict[str, Any], use_flat_index: bool = True
     ) -> list[dict[str, Any]]:
         """Get index information from metadata for return values.
 
         Args:
             collection_name: Collection name
             metadata: Schema metadata
+            use_flat_index: Whether FLAT index was used for dense vector fields (default: True)
 
         Returns:
             List of index information dictionaries
@@ -276,11 +290,17 @@ class MilvusSchemaBuilder:
                 else:
                     # Determine metric type based on vector type
                     metric_type = "HAMMING" if field_type == "BinaryVector" else "L2"
+                    
+                    # Determine index type - FLAT only applies to dense vector fields
+                    if use_flat_index and field_type in ["FloatVector", "Float16Vector", "BFloat16Vector"]:
+                        index_type = "FLAT"
+                    else:
+                        index_type = "AUTOINDEX"
 
                     index_info.append(
                         {
                             "field": field_name,
-                            "index_type": "AUTOINDEX",  # MilvusClient uses AUTOINDEX by default
+                            "index_type": index_type,
                             "metric_type": metric_type,
                         }
                     )

@@ -116,18 +116,20 @@ milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --acces
 
 # Send data to Milvus
 # Direct insert to Milvus (reads local parquet and JSON files and creates collection)
-milvus-ingest to-milvus insert ./output                                # Insert to local Milvus
+milvus-ingest to-milvus insert ./output                                # Insert to local Milvus (uses FLAT index by default)
 milvus-ingest to-milvus insert ./output --uri http://192.168.1.100:19530 --token your-token  # Remote Milvus with auth
 milvus-ingest to-milvus insert ./output --drop-if-exists               # Drop existing collection and recreate
 milvus-ingest to-milvus insert ./output --collection-name my_collection --batch-size 5000  # Custom settings
+milvus-ingest to-milvus insert ./output --use-autoindex                # Use AUTOINDEX for better performance (lower recall)
 
 # Bulk import to Milvus (upload + import in one step)
 # Note: Combines upload and import for convenience, includes auto-collection creation
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000  # Upload and import
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000  # Upload and import (uses FLAT index by default)
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --collection-name my_collection  # Override collection name
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait  # Wait for completion
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret  # With credentials
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --drop-if-exists  # Drop and recreate
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-autoindex  # Use AUTOINDEX for better performance
 
 # Verify data in Milvus
 # Comprehensive verification system with three levels (all include query/search correctness tests)
@@ -163,6 +165,7 @@ milvus-ingest/
 │   ├── uploader.py             # S3/MinIO upload functionality
 │   ├── builtin_schemas.py      # Built-in schema definitions and metadata
 │   ├── generator.py            # Legacy generator (for compatibility)
+│   ├── verifier.py             # Comprehensive Milvus data verification system
 │   ├── rich_display.py         # Rich terminal formatting and progress bars
 │   ├── logging_config.py       # Loguru-based structured logging
 │   ├── exceptions.py           # Custom exception classes
@@ -273,6 +276,43 @@ Generated data includes a `meta.json` file with:
 - **Primary Key Uniqueness**: Ensured across all files using offset-based generation
 - **Partition Key Cardinality**: Unique values = `num_partitions × 10` for proper distribution
 - **Shard Distribution**: Based on primary key hash for even distribution across VChannels
+
+## Vector Index Strategy
+
+### FLAT vs AUTOINDEX for Vector Fields
+
+The system provides two indexing strategies for dense vector fields (FloatVector, Float16Vector, BFloat16Vector). Note that sparse vectors (SparseFloatVector) and binary vectors (BinaryVector) always use their specialized index types regardless of this setting:
+
+#### AUTOINDEX (`--use-autoindex`)
+- **Performance**: Optimized for speed and memory efficiency
+- **Recall**: ~90-95% typical recall (approximate search)
+- **Memory**: Lower memory usage
+- **Use Cases**: Production workloads, large datasets, when speed > perfect accuracy
+
+#### FLAT Index (Default for Dense Vectors)
+- **Performance**: Slower but guaranteed exact results  
+- **Recall**: 100% recall (brute-force exact search)
+- **Memory**: Higher memory usage (stores all vectors in memory)
+- **Use Cases**: Verification, testing, small datasets, when accuracy is critical
+- **Applies to**: FloatVector, Float16Vector, BFloat16Vector only
+
+#### When to Use AUTOINDEX
+```bash
+# For production workloads where speed > perfect accuracy
+milvus-ingest to-milvus insert ./output --use-autoindex
+
+# For large datasets with memory constraints
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket prod --use-autoindex
+
+# When you need better performance and can accept ~90-95% recall
+```
+
+#### Index Types by Vector Field Type
+- **FloatVector, Float16Vector, BFloat16Vector**: FLAT (default) or AUTOINDEX (with `--use-autoindex`)
+- **SparseFloatVector**: Always uses SPARSE_INVERTED_INDEX (regardless of setting)
+- **BinaryVector**: Always uses AUTOINDEX with HAMMING metric (FLAT not supported)
+
+⚠️ **Memory Considerations**: FLAT index (default for dense vectors) loads all vectors into memory. Ensure sufficient RAM for your dataset size. Use `--use-autoindex` for memory-constrained environments.
 
 ## Important Technical Patterns
 
@@ -399,6 +439,7 @@ Options:
   --no-index                  Skip creating indexes on vector fields
   --batch-size INTEGER        Batch size for inserting (default: 10000)
   --no-progress               Disable progress bar
+  --use-autoindex             Use AUTOINDEX for dense vector fields (faster but ~90-95% recall, overrides default FLAT index)
 ```
 
 #### Bulk Import (Upload + Import)
@@ -421,6 +462,7 @@ Optional Options:
   --wait                      Wait for import to complete
   --timeout INTEGER           Timeout in seconds when waiting
   --drop-if-exists            Drop collection if exists before creating
+  --use-autoindex             Use AUTOINDEX for dense vector fields (faster but ~90-95% recall, overrides default FLAT index)
 ```
 
 #### Data Verification

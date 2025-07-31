@@ -63,6 +63,7 @@ class MilvusBulkImporter:
         collection_name: str,
         schema_metadata: dict[str, Any] | None = None,
         drop_if_exists: bool = False,
+        use_flat_index: bool = True,
     ) -> bool:
         """Ensure collection exists, create if needed.
 
@@ -70,6 +71,7 @@ class MilvusBulkImporter:
             collection_name: Target collection name
             schema_metadata: Schema metadata for creating collection (from meta.json)
             drop_if_exists: Drop collection if it already exists
+            use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall)
 
         Returns:
             True if collection was created, False if it already existed
@@ -87,7 +89,7 @@ class MilvusBulkImporter:
         if schema_metadata:
             # Use unified schema builder to create collection
             return self.schema_builder.create_collection_with_schema(
-                collection_name, schema_metadata, drop_if_exists=False
+                collection_name, schema_metadata, drop_if_exists=False, use_flat_index=use_flat_index
             )
         else:
             raise ValueError(
@@ -141,6 +143,7 @@ class MilvusBulkImporter:
         show_progress: bool = True,
         create_collection: bool = True,
         drop_if_exists: bool = False,
+        use_flat_index: bool = True,
     ) -> str:
         """Start bulk import job.
 
@@ -151,6 +154,7 @@ class MilvusBulkImporter:
             show_progress: Show progress bar
             create_collection: Try to create collection if it doesn't exist
             drop_if_exists: Drop collection if it already exists
+            use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall)
 
         Returns:
             Job ID for the import task
@@ -164,7 +168,7 @@ class MilvusBulkImporter:
                 if metadata:
                     # Use unified schema builder to create collection if needed
                     self.schema_builder.create_collection_with_schema(
-                        collection_name, metadata, drop_if_exists=drop_if_exists
+                        collection_name, metadata, drop_if_exists=drop_if_exists, use_flat_index=use_flat_index
                     )
                 else:
                     # Just check if collection exists

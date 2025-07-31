@@ -916,6 +916,11 @@ def to_milvus() -> None:
     is_flag=True,
     help="Disable progress bar during import",
 )
+@click.option(
+    "--use-autoindex",
+    is_flag=True,
+    help="Use AUTOINDEX for dense vector fields (faster but ~90-95% recall, overrides default FLAT index)",
+)
 def insert_to_milvus(
     data_path: Path,
     uri: str = "http://localhost:19530",
@@ -926,6 +931,7 @@ def insert_to_milvus(
     no_index: bool = False,
     batch_size: int = 10000,
     no_progress: bool = False,
+    use_autoindex: bool = False,
 ) -> None:
     """Insert generated data directly to Milvus.
 
@@ -965,6 +971,7 @@ def insert_to_milvus(
             create_index=not no_index,
             batch_size=batch_size,
             show_progress=not no_progress,
+            use_flat_index=not use_autoindex,  # Default to FLAT unless --use-autoindex specified
         )
 
         # Display results
@@ -1204,6 +1211,11 @@ def verify_milvus_data(
     is_flag=True,
     help="Drop collection if it already exists before creating",
 )
+@click.option(
+    "--use-autoindex",
+    is_flag=True,
+    help="Use AUTOINDEX for dense vector fields (faster but ~90-95% recall, overrides default FLAT index)",
+)
 def import_to_milvus(
     collection_name: str | None,
     local_path: Path,
@@ -1218,6 +1230,7 @@ def import_to_milvus(
     wait: bool = False,
     timeout: int | None = None,
     drop_if_exists: bool = False,
+    use_autoindex: bool = False,
 ) -> None:
     """Upload data to S3/MinIO and bulk import to Milvus in one step.
 
@@ -1305,6 +1318,7 @@ def import_to_milvus(
             show_progress=True,
             create_collection=True,  # Always try to create with metadata
             drop_if_exists=drop_if_exists,
+            use_flat_index=not use_autoindex,  # Default to FLAT unless --use-autoindex specified
         )
 
         print(f"✓ Import job started: {job_id}")
