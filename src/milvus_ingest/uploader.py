@@ -256,11 +256,18 @@ class S3Uploader:
                             file_size_gb = file_path.stat().st_size / (1024**3)
                             self.logger.info(
                                 f"Uploading large file: {file_path.name} ({file_size_gb:.1f}GB) "
-                                f"using multipart upload with 256MB chunks"
+                                f"using multipart upload with integrity verification"
                             )
 
-                        self._upload_file(file_path, bucket, s3_key)
-                        uploaded_files += 1
+                        upload_result = self._upload_file(file_path, bucket, s3_key)
+                        if upload_result["success"] and upload_result["integrity_valid"]:
+                            uploaded_files += 1
+                        else:
+                            failed_files.append({
+                                "file": str(file_path), 
+                                "error": "Upload integrity verification failed",
+                                "details": upload_result
+                            })
                         progress.update(task, advance=1)
                     except Exception as e:
                         self.logger.error(f"Failed to upload {file_path}: {e}")
@@ -288,21 +295,36 @@ class S3Uploader:
                         file_size_gb = file_path.stat().st_size / (1024**3)
                         self.logger.info(
                             f"Uploading large file: {file_path.name} ({file_size_gb:.1f}GB) "
-                            f"using multipart upload with 256MB chunks"
+                            f"using multipart upload with integrity verification"
                         )
 
-                    self._upload_file(file_path, bucket, s3_key)
-                    uploaded_files += 1
+                    upload_result = self._upload_file(file_path, bucket, s3_key)
+                    if upload_result["success"] and upload_result["integrity_valid"]:
+                        uploaded_files += 1
+                    else:
+                        failed_files.append({
+                            "file": str(file_path), 
+                            "error": "Upload integrity verification failed",
+                            "details": upload_result
+                        })
                 except Exception as e:
                     self.logger.error(f"Failed to upload {file_path}: {e}")
                     failed_files.append({"file": str(file_path), "error": str(e)})
 
+        # Validate uploaded files if all uploads succeeded
+        validation_results = None
+        if uploaded_files > 0 and len(failed_files) == 0 and local_path.exists():
+            validation_results = self._validate_uploaded_files(
+                local_path, bucket, prefix, files_to_upload
+            )
+        
         return {
             "uploaded_files": uploaded_files,
             "failed_files": failed_files,
             "total_size": total_size,
             "bucket": bucket,
             "prefix": prefix,
+            "validation": validation_results,
         }
 
     def _ensure_bucket_exists(self, bucket: str) -> None:
@@ -350,29 +372,55 @@ class S3Uploader:
         bucket: str,
         key: str,
         progress_callback: Callable[[int], None] | None = None,
-    ) -> None:
-        """Upload a single file to S3 using multipart upload for large files.
+    ) -> dict[str, Any]:
+        """Upload a single file to S3 using multipart upload for large files with integrity validation.
 
         Args:
             file_path: Local file path to upload
             bucket: S3 bucket name
             key: S3 object key
             progress_callback: Optional callback function for progress updates
+            
+        Returns:
+            Dictionary with upload results including integrity validation
         """
+        import hashlib
+        
+        result = {
+            "success": False,
+            "file_path": str(file_path),
+            "s3_key": key,
+            "local_size": 0,
+            "remote_size": 0,
+            "local_etag": None,
+            "remote_etag": None,
+            "integrity_valid": False
+        }
+        
         try:
-            # Use upload_file which automatically handles multipart for large files
-            extra_args: dict[str, Any] = {}
+            # Get local file information
+            file_size = file_path.stat().st_size
+            result["local_size"] = file_size
+            
+            # Calculate MD5 for small files (< 1GB) for ETag comparison
+            # For larger files, use multipart ETag calculation
+            if file_size < 1024 * 1024 * 1024:  # < 1GB
+                result["local_etag"] = self._calculate_file_md5(file_path)
+            else:
+                # For large files, calculate multipart ETag
+                transfer_config = self._get_transfer_config(file_size)
+                chunk_size = transfer_config.multipart_chunksize
+                result["local_etag"] = self._calculate_multipart_etag(file_path, chunk_size)
 
             # Get optimized transfer config based on file size
-            file_size = file_path.stat().st_size
             transfer_config = self._get_transfer_config(file_size)
 
             # Log config details for large files
             if file_size > 5 * 1024**3:  # > 5GB
                 chunk_size_mb = transfer_config.multipart_chunksize / (1024**2)
                 self.logger.info(
-                    f"Using {chunk_size_mb:.0f}MB chunks with {transfer_config.max_concurrency} "
-                    f"concurrent uploads for {file_path.name}"
+                    f"Uploading large file {file_path.name} ({file_size / (1024**3):.1f}GB) "
+                    f"using {chunk_size_mb:.0f}MB chunks with {transfer_config.max_concurrency} concurrent uploads"
                 )
 
             # Create a callback wrapper if progress tracking is requested
@@ -380,15 +428,33 @@ class S3Uploader:
             if progress_callback:
                 callback = ProgressPercentage(file_path, progress_callback)
 
+            # Upload the file
             self.s3_client.upload_file(
                 Filename=str(file_path),
                 Bucket=bucket,
                 Key=key,
                 Config=transfer_config,
                 Callback=callback,
-                ExtraArgs=extra_args,
+                ExtraArgs={},
             )
-            self.logger.debug(f"Uploaded {file_path} to s3://{bucket}/{key}")
+            
+            # Verify upload integrity
+            integrity_check = self._verify_upload_integrity(bucket, key, result)
+            result.update(integrity_check)
+            
+            if result["integrity_valid"]:
+                self.logger.debug(f"✅ Upload verified: {file_path} -> s3://{bucket}/{key}")
+                result["success"] = True
+            else:
+                self.logger.error(f"❌ Upload integrity check failed: {file_path}")
+                # Clean up failed upload
+                try:
+                    self.s3_client.delete_object(Bucket=bucket, Key=key)
+                    self.logger.info(f"Cleaned up failed upload: s3://{bucket}/{key}")
+                except Exception as cleanup_error:
+                    self.logger.warning(f"Failed to clean up failed upload: {cleanup_error}")
+                raise ValueError(f"Upload integrity validation failed for {file_path}")
+                
         except NoCredentialsError as e:
             raise ValueError(
                 "No credentials found. Please provide access_key_id and secret_access_key "
@@ -406,6 +472,403 @@ class S3Uploader:
         except Exception as e:
             self.logger.error(f"Failed to upload {file_path}: {e}")
             raise
+            
+        return result
+
+    def _calculate_file_md5(self, file_path: Path) -> str:
+        """Calculate MD5 hash of a file."""
+        import hashlib
+        
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            # Read in 64kb chunks to handle large files efficiently
+            for chunk in iter(lambda: f.read(65536), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    
+    def _calculate_multipart_etag(self, file_path: Path, chunk_size: int) -> str:
+        """Calculate multipart ETag for large files (S3 multipart upload format)."""
+        import hashlib
+        
+        chunk_hashes = []
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                chunk_hashes.append(hashlib.md5(chunk).digest())
+        
+        if len(chunk_hashes) == 1:
+            # Single part, return simple MD5
+            return chunk_hashes[0].hex()
+        else:
+            # Multipart, combine all chunk hashes
+            combined_hash = hashlib.md5(b''.join(chunk_hashes)).hexdigest()
+            return f"{combined_hash}-{len(chunk_hashes)}"
+    
+    def _verify_upload_integrity(self, bucket: str, key: str, upload_info: dict) -> dict[str, Any]:
+        """Verify uploaded file integrity by comparing size and ETag."""
+        result = {
+            "remote_size": 0,
+            "remote_etag": None,
+            "integrity_valid": False
+        }
+        
+        try:
+            # Get remote file metadata
+            response = self.s3_client.head_object(Bucket=bucket, Key=key)
+            result["remote_size"] = response.get("ContentLength", 0)
+            result["remote_etag"] = response.get("ETag", "").strip('"')
+            
+            # Check size match
+            size_match = result["remote_size"] == upload_info["local_size"]
+            
+            # Check ETag match (more complex for multipart uploads)
+            etag_match = False
+            local_etag = upload_info.get("local_etag", "")
+            remote_etag = result["remote_etag"]
+            
+            if local_etag and remote_etag:
+                # Handle multipart ETags (contain dashes)
+                if "-" in remote_etag:
+                    # Multipart upload - ETags format: hash-partcount
+                    etag_match = local_etag == remote_etag
+                else:
+                    # Single part upload - simple MD5 comparison
+                    etag_match = local_etag.split("-")[0] == remote_etag
+            
+            result["integrity_valid"] = size_match and etag_match
+            
+            if not size_match:
+                self.logger.warning(
+                    f"Size mismatch - Local: {upload_info['local_size']}, Remote: {result['remote_size']}"
+                )
+            if not etag_match:
+                self.logger.warning(
+                    f"ETag mismatch - Local: {local_etag}, Remote: {remote_etag}"
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Failed to verify upload integrity: {e}")
+            
+        return result
+
+    def _validate_uploaded_files(
+        self, 
+        local_path: Path, 
+        bucket: str, 
+        prefix: str, 
+        uploaded_files: list[Path]
+    ) -> dict[str, Any]:
+        """Validate uploaded files by reading them directly from S3.
+        
+        Args:
+            local_path: Local directory path
+            bucket: S3 bucket name
+            prefix: S3 prefix
+            uploaded_files: List of local files that were uploaded
+            
+        Returns:
+            Dictionary with validation results
+        """
+        import json
+        import pandas as pd
+        import pyarrow.parquet as pq
+        
+        self.logger.info("Validating uploaded files in S3...")
+        
+        validation_results = {
+            "valid": True,
+            "total_files": len(uploaded_files),
+            "validated_files": 0,
+            "failed_validations": [],
+            "file_details": []
+        }
+        
+        # Find meta.json to understand the expected format
+        meta_file = local_path / "meta.json"
+        file_format = "parquet"  # default
+        if meta_file.exists():
+            try:
+                with open(meta_file) as f:
+                    metadata = json.load(f)
+                    file_format = metadata.get("generation_info", {}).get("format", "parquet")
+            except Exception as e:
+                self.logger.warning(f"Could not read meta.json: {e}")
+        
+        # Validate each uploaded file by reading from S3
+        for file_path in uploaded_files:
+            # Skip meta.json as it's not a data file
+            if file_path.name == "meta.json":
+                continue
+                
+            try:
+                # Calculate S3 key for this file
+                relative_path = file_path.relative_to(local_path)
+                relative_path_str = str(relative_path).replace("\\", "/")
+                
+                if prefix:
+                    clean_prefix = prefix.rstrip("/")
+                    s3_key = f"{clean_prefix}/{relative_path_str}"
+                else:
+                    s3_key = relative_path_str
+                
+                # Build S3 URL for pandas/pyarrow
+                if self.endpoint_url:
+                    s3_url = f"{self.endpoint_url.rstrip('/')}/{bucket}/{s3_key}"
+                else:
+                    s3_url = f"s3://{bucket}/{s3_key}"
+                
+                # Validate file by reading from S3
+                file_validation = self._validate_single_s3_file(
+                    s3_url, file_path.name, file_format, bucket, s3_key
+                )
+                
+                validation_results["file_details"].append(file_validation)
+                
+                if file_validation["valid"]:
+                    validation_results["validated_files"] += 1
+                else:
+                    validation_results["valid"] = False
+                    validation_results["failed_validations"].append({
+                        "file": file_path.name,
+                        "s3_key": s3_key,
+                        "errors": file_validation.get("errors", [])
+                    })
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to validate {file_path.name}: {e}")
+                validation_results["valid"] = False
+                validation_results["failed_validations"].append({
+                    "file": file_path.name,
+                    "errors": [f"Validation error: {e}"]
+                })
+        
+        # Log results
+        if validation_results["valid"]:
+            self.logger.info(
+                f"✅ All {validation_results['validated_files']} uploaded files validated successfully"
+            )
+        else:
+            self.logger.warning(
+                f"⚠️ Upload validation failed for {len(validation_results['failed_validations'])} files"
+            )
+            
+        return validation_results
+    
+    def _validate_single_s3_file(
+        self, 
+        s3_url: str, 
+        filename: str, 
+        file_format: str,
+        bucket: str,
+        s3_key: str
+    ) -> dict[str, Any]:
+        """Validate a single file directly from S3.
+        
+        Args:
+            s3_url: Full S3 URL to the file
+            filename: Original filename  
+            file_format: Expected format (parquet or json)
+            bucket: S3 bucket name
+            s3_key: S3 object key
+            
+        Returns:
+            Dictionary with file validation results
+        """
+        import pandas as pd
+        import pyarrow.parquet as pq
+        import json
+        
+        result = {
+            "filename": filename,
+            "s3_key": s3_key,
+            "valid": True,
+            "errors": [],
+            "row_count": 0,
+            "file_size_bytes": 0
+        }
+        
+        try:
+            # Get file metadata from S3
+            response = self.s3_client.head_object(Bucket=bucket, Key=s3_key)
+            result["file_size_bytes"] = response.get("ContentLength", 0)
+            
+            # Validate based on format
+            if file_format.lower() == "parquet":
+                result.update(self._validate_s3_parquet_file(s3_url, bucket, s3_key))
+            elif file_format.lower() == "json":
+                result.update(self._validate_s3_json_file(s3_url, bucket, s3_key))
+            else:
+                result["valid"] = False
+                result["errors"].append(f"Unsupported format: {file_format}")
+                
+        except Exception as e:
+            result["valid"] = False
+            result["errors"].append(f"Failed to validate file: {e}")
+            
+        return result
+    
+    def _validate_s3_parquet_file(self, s3_url: str, bucket: str, s3_key: str) -> dict[str, Any]:
+        """Validate a parquet file directly from S3."""
+        import io
+        import pandas as pd
+        import pyarrow.parquet as pq
+        
+        result = {"parquet_validation": {}}
+        
+        try:
+            # Get file size first to determine validation strategy
+            head_response = self.s3_client.head_object(Bucket=bucket, Key=s3_key)
+            file_size = head_response.get("ContentLength", 0)
+            
+            # For files > 100MB, use streaming/partial validation
+            if file_size > 100 * 1024 * 1024:  # > 100MB
+                self.logger.info(f"Large file detected ({file_size / (1024*1024):.1f}MB), using streaming validation")
+                result.update(self._validate_large_parquet_streaming(bucket, s3_key))
+            else:
+                # For smaller files, use full download validation
+                response = self.s3_client.get_object(Bucket=bucket, Key=s3_key)
+                file_content = response['Body'].read()
+                
+                # Create a BytesIO buffer for parquet reading
+                buffer = io.BytesIO(file_content)
+                
+                # Try to read the parquet file metadata
+                parquet_file = pq.ParquetFile(buffer)
+                metadata = parquet_file.metadata
+                
+                result["row_count"] = metadata.num_rows
+                result["parquet_validation"] = {
+                    "num_row_groups": metadata.num_row_groups,
+                    "columns": metadata.num_columns,
+                    "format_version": str(metadata.format_version)
+                }
+                
+                # Reset buffer and try to read a small sample
+                buffer.seek(0)
+                df_sample = pd.read_parquet(buffer, nrows=10)
+                
+                if len(df_sample) == 0 and metadata.num_rows > 0:
+                    result["valid"] = False
+                    result["errors"].append("File appears empty but metadata indicates rows")
+                
+        except Exception as e:
+            result["valid"] = False  
+            result["errors"].append(f"Parquet validation error: {e}")
+            
+        return result
+    
+    def _validate_large_parquet_streaming(self, bucket: str, s3_key: str) -> dict[str, Any]:
+        """Validate large parquet files using partial/streaming reads."""
+        import io
+        import pandas as pd
+        import pyarrow.parquet as pq
+        
+        result = {"parquet_validation": {}}
+        
+        try:
+            # Read only the first 10MB to get metadata and validate structure
+            partial_response = self.s3_client.get_object(
+                Bucket=bucket, 
+                Key=s3_key,
+                Range="bytes=0-10485759"  # First 10MB
+            )
+            partial_content = partial_response['Body'].read()
+            
+            # Try to read parquet metadata from partial content
+            buffer = io.BytesIO(partial_content)
+            
+            try:
+                parquet_file = pq.ParquetFile(buffer)
+                metadata = parquet_file.metadata
+                
+                result["row_count"] = metadata.num_rows
+                result["parquet_validation"] = {
+                    "num_row_groups": metadata.num_row_groups,
+                    "columns": metadata.num_columns,
+                    "format_version": str(metadata.format_version),
+                    "validation_method": "partial_read"
+                }
+                
+                # Try to read first few rows as sample
+                buffer.seek(0)
+                df_sample = pd.read_parquet(buffer, nrows=5)
+                
+                if len(df_sample) == 0 and metadata.num_rows > 0:
+                    result["valid"] = False
+                    result["errors"].append("File appears empty but metadata indicates rows")
+                    
+            except Exception:
+                # If partial read fails, try reading parquet footer only
+                # Parquet files store metadata at the end
+                head_response = self.s3_client.head_object(Bucket=bucket, Key=s3_key)
+                file_size = head_response.get("ContentLength", 0)
+                
+                if file_size > 1024:  # Only if file is reasonably sized
+                    # Read last 1KB which should contain the footer
+                    footer_response = self.s3_client.get_object(
+                        Bucket=bucket,
+                        Key=s3_key,
+                        Range=f"bytes={file_size-1024}-{file_size-1}"
+                    )
+                    footer_content = footer_response['Body'].read()
+                    
+                    # Basic validation - check for parquet magic bytes
+                    if b'PAR1' in footer_content:
+                        result["parquet_validation"] = {
+                            "has_parquet_footer": True,
+                            "validation_method": "footer_check"
+                        }
+                    else:
+                        result["valid"] = False
+                        result["errors"].append("Invalid parquet footer signature")
+                
+        except Exception as e:
+            result["valid"] = False
+            result["errors"].append(f"Large parquet validation error: {e}")
+            
+        return result
+        
+    def _validate_s3_json_file(self, s3_url: str, bucket: str, s3_key: str) -> dict[str, Any]:
+        """Validate a JSON file directly from S3."""
+        import json
+        
+        result = {"json_validation": {}}
+        
+        try:
+            # Download file content to memory for validation
+            response = self.s3_client.get_object(Bucket=bucket, Key=s3_key)
+            file_content = response['Body'].read().decode('utf-8')
+            
+            # Try to read as JSON (should be array of objects)
+            data = json.loads(file_content)
+                
+            if isinstance(data, list):
+                result["row_count"] = len(data)
+                result["json_validation"]["is_array"] = True
+                
+                # Check first few records
+                if data:
+                    sample_records = data[:min(5, len(data))]
+                    all_dicts = all(isinstance(record, dict) for record in sample_records)
+                    result["json_validation"]["records_are_dicts"] = all_dicts
+                    
+                    if not all_dicts:
+                        result["valid"] = False
+                        result["errors"].append("JSON contains non-dictionary records")
+            else:
+                result["valid"] = False
+                result["errors"].append("JSON file is not an array of objects")
+                
+        except json.JSONDecodeError as e:
+            result["valid"] = False
+            result["errors"].append(f"Invalid JSON format: {e}")
+        except Exception as e:
+            result["valid"] = False
+            result["errors"].append(f"JSON validation error: {e}")
+            
+        return result
 
     def test_connection(self) -> bool:
         """Test connection to S3/MinIO."""

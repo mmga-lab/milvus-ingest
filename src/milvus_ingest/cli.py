@@ -856,6 +856,49 @@ def upload(
                 )
             )
 
+        # Display validation results
+        validation = result.get("validation")
+        if validation:
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            
+            if validation["valid"]:
+                console.print("\n✅ [bold green]Upload validation passed[/bold green]")
+            else:
+                console.print("\n❌ [bold red]Upload validation failed[/bold red]")
+            
+            # Summary table
+            table = Table(title="Upload Validation Summary", show_header=True)
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="white")
+            
+            table.add_row("Total Files", f"{validation['total_files']}")
+            table.add_row("Validated Files", f"{validation['validated_files']}")
+            table.add_row("Failed Validations", f"{len(validation['failed_validations'])}")
+            
+            console.print(table)
+            
+            # Show failed validations if any
+            if validation["failed_validations"]:
+                console.print("\n[bold red]Failed File Validations:[/bold red]")
+                for failure in validation["failed_validations"]:
+                    console.print(f"  • [red]{failure['file']}[/red]: {failure['s3_key']}")
+                    for error in failure.get("errors", []):
+                        console.print(f"    - {error}")
+            
+            # Show file details in verbose mode (optional)
+            if validation["file_details"] and len(validation["file_details"]) <= 5:
+                console.print("\n[dim]File Details:[/dim]")
+                for detail in validation["file_details"]:
+                    status = "✅" if detail["valid"] else "❌"
+                    size_mb = detail["file_size_bytes"] / (1024 * 1024)
+                    console.print(
+                        f"  {status} [cyan]{detail['filename']}[/cyan]: "
+                        f"{detail.get('row_count', 0):,} rows, {size_mb:.2f} MB"
+                    )
+
     except ValueError as e:
         display_error(f"Invalid input: {e}")
         ctx = click.get_current_context()
