@@ -715,7 +715,7 @@ class S3Uploader:
         import pandas as pd
         import pyarrow.parquet as pq
         
-        result = {"parquet_validation": {}}
+        result = {"parquet_validation": {}, "errors": []}
         
         try:
             # Get file size first to determine validation strategy
@@ -745,9 +745,11 @@ class S3Uploader:
                     "format_version": str(metadata.format_version)
                 }
                 
-                # Reset buffer and try to read a small sample
+                # Reset buffer and try to read a small sample (read first few rows)
                 buffer.seek(0)
-                df_sample = pd.read_parquet(buffer, nrows=10)
+                df_sample = pd.read_parquet(buffer)
+                # Take only first 10 rows for validation
+                df_sample = df_sample.head(10)
                 
                 if len(df_sample) == 0 and metadata.num_rows > 0:
                     result["valid"] = False
@@ -765,7 +767,7 @@ class S3Uploader:
         import pandas as pd
         import pyarrow.parquet as pq
         
-        result = {"parquet_validation": {}}
+        result = {"parquet_validation": {}, "errors": []}
         
         try:
             # Read only the first 10MB to get metadata and validate structure
@@ -793,7 +795,7 @@ class S3Uploader:
                 
                 # Try to read first few rows as sample
                 buffer.seek(0)
-                df_sample = pd.read_parquet(buffer, nrows=5)
+                df_sample = pd.read_parquet(buffer).head(5)
                 
                 if len(df_sample) == 0 and metadata.num_rows > 0:
                     result["valid"] = False
@@ -834,7 +836,7 @@ class S3Uploader:
         """Validate a JSON file directly from S3."""
         import json
         
-        result = {"json_validation": {}}
+        result = {"json_validation": {}, "errors": []}
         
         try:
             # Download file content to memory for validation
