@@ -1089,6 +1089,35 @@ def _generate_files_parallel(
         f"✅ Parallel generation completed: {len(all_files_created)} files, {rows:,} rows, {total_time:.2f}s ({rows / total_time:.0f} rows/sec)"
     )
 
+    # Always run lightweight validation
+    from .lightweight_validator import LightweightValidator
+    from rich.console import Console
+
+    try:
+        # Create validator
+        console = Console()
+        validator = LightweightValidator(output_dir, console)
+        
+        # Run validation
+        logger.info("Running lightweight file validation...")
+        validation_results = validator.validate(sample_rows=100)
+        
+        # Display results
+        validator.display_results(validation_results)
+        
+        # Log validation status
+        if validation_results["valid"]:
+            logger.info("✅ File validation passed")
+        else:
+            logger.warning(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
+            # Don't fail the generation, just warn
+            for error in validation_results["errors"]:
+                logger.warning(f"  - {error}")
+                
+    except Exception as e:
+        logger.warning(f"Failed to run validation: {e}")
+        # Don't fail the generation if validation fails
+
     return all_files_created
 
 
