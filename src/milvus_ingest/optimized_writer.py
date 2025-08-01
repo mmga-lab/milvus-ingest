@@ -1085,11 +1085,13 @@ def _generate_files_parallel(
     with open(meta_file, "w") as f:
         json.dump(serializable_metadata, f, indent=2)
 
+    print(f"🎯 Generation completed, proceeding to validation...")
     logger.info(
         f"✅ Parallel generation completed: {len(all_files_created)} files, {rows:,} rows, {total_time:.2f}s ({rows / total_time:.0f} rows/sec)"
     )
 
     # Always run lightweight validation
+    print("📊 Starting file validation process...")
     from .lightweight_validator import LightweightValidator
     from rich.console import Console
 
@@ -1099,22 +1101,27 @@ def _generate_files_parallel(
         validator = LightweightValidator(output_dir, console)
         
         # Run validation
+        print("🔍 Running lightweight file validation...")
         logger.info("Running lightweight file validation...")
         validation_results = validator.validate(sample_rows=100)
         
         # Display results
         validator.display_results(validation_results)
         
-        # Log validation status
+        # Log validation status with higher visibility
         if validation_results["valid"]:
+            print(f"✅ File validation passed: {validation_results['summary']['total_files']} files, {validation_results['summary']['total_rows']:,} rows")
             logger.info("✅ File validation passed")
         else:
+            print(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
             logger.warning(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
             # Don't fail the generation, just warn
             for error in validation_results["errors"]:
+                print(f"  - {error}")
                 logger.warning(f"  - {error}")
                 
     except Exception as e:
+        print(f"❌ Validation failed: {e}")
         logger.warning(f"Failed to run validation: {e}")
         # Don't fail the generation if validation fails
 
@@ -2873,5 +2880,40 @@ def generate_data_optimized(
             f"Total generation completed: {rows:,} rows in {len(all_files_created)} file(s)"
         )
         logger.info(f"Total time: {total_time:.2f}s ({rows / total_time:.0f} rows/sec)")
+
+    # Always run lightweight validation (for serial generation path)
+    print("📊 Starting file validation process (serial path)...")
+    from .lightweight_validator import LightweightValidator
+    from rich.console import Console
+
+    try:
+        # Create validator
+        console = Console()
+        validator = LightweightValidator(output_dir, console)
+        
+        # Run validation
+        print("🔍 Running lightweight file validation...")
+        logger.info("Running lightweight file validation...")
+        validation_results = validator.validate(sample_rows=100)
+        
+        # Display results
+        validator.display_results(validation_results)
+        
+        # Log validation status with higher visibility
+        if validation_results["valid"]:
+            print(f"✅ File validation passed: {validation_results['summary']['total_files']} files, {validation_results['summary']['total_rows']:,} rows")
+            logger.info("✅ File validation passed")
+        else:
+            print(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
+            logger.warning(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
+            # Don't fail the generation, just warn
+            for error in validation_results["errors"]:
+                print(f"  - {error}")
+                logger.warning(f"  - {error}")
+                
+    except Exception as e:
+        print(f"❌ Validation failed: {e}")
+        logger.warning(f"Failed to run validation: {e}")
+        # Don't fail the generation if validation fails
 
     return all_files_created
