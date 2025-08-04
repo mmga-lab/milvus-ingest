@@ -16,6 +16,36 @@ pipeline {
         }
     }
     parameters {
+        booleanParam(
+            description: 'Use existing Milvus instance instead of deploying a new one',
+            name: 'use_existing_instance',
+            defaultValue: false
+        )
+        string(
+            description: 'Milvus URI (required if use_existing_instance is true)',
+            name: 'milvus_uri',
+            defaultValue: ''
+        )
+        string(
+            description: 'MinIO Endpoint URL (required if use_existing_instance is true)',
+            name: 'minio_endpoint',
+            defaultValue: ''
+        )
+        string(
+            description: 'MinIO Access Key (required if use_existing_instance is true)',
+            name: 'minio_access_key',
+            defaultValue: 'minioadmin'
+        )
+        string(
+            description: 'MinIO Secret Key (required if use_existing_instance is true)',
+            name: 'minio_secret_key',
+            defaultValue: 'minioadmin'
+        )
+        string(
+            description: 'MinIO Bucket Name',
+            name: 'minio_bucket',
+            defaultValue: 'milvus-bucket'
+        )
         string(
             description: 'Image Repository',
             name: 'image_repository',
@@ -118,6 +148,29 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
     }
 
     stages {
+        stage('Validate Parameters') {
+            when {
+                expression { params.use_existing_instance == true }
+            }
+            steps {
+                container('main') {
+                    script {
+                        if (!params.milvus_uri || params.milvus_uri.trim().isEmpty()) {
+                            error("Milvus URI is required when using existing instance")
+                        }
+                        if (!params.minio_endpoint || params.minio_endpoint.trim().isEmpty()) {
+                            error("MinIO endpoint is required when using existing instance")
+                        }
+                        
+                        echo "Using existing Milvus instance:"
+                        echo "  Milvus URI: ${params.milvus_uri}"
+                        echo "  MinIO Endpoint: ${params.minio_endpoint}"
+                        echo "  MinIO Bucket: ${params.minio_bucket}"
+                    }
+                }
+            }
+        }
+        
         stage('Install Dependencies') {
             steps {
                 container('main') {
@@ -158,6 +211,9 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         }        
 
         stage('Prepare Milvus Values') {
+            when {
+                expression { params.use_existing_instance == false }
+            }
             steps {
                 container('main') {
                     script {
@@ -191,6 +247,9 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         }
 
         stage('Deploy Milvus') {
+            when {
+                expression { params.use_existing_instance == false }
+            }
             options {
                 timeout(time: 15, unit: 'MINUTES')
             }
@@ -284,24 +343,44 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 container('main') {
                     script {
                         def outputPath = "/root/milvus_ingest_data/${env.BUILD_ID}"
-                        def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
-                        def minioHost = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-minio -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                        def milvusUri = ""
+                        def minioEndpoint = ""
+                        def minioAccessKey = params.minio_access_key
+                        def minioSecretKey = params.minio_secret_key
+                        def minioBucket = params.minio_bucket
+                        
+                        if (params.use_existing_instance) {
+                            // Use provided URIs
+                            milvusUri = params.milvus_uri
+                            minioEndpoint = params.minio_endpoint
+                            
+                            if (!milvusUri || !minioEndpoint) {
+                                error("Milvus URI and MinIO endpoint must be provided when using existing instance")
+                            }
+                        } else {
+                            // Get URIs from deployed services
+                            def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                            def minioHost = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-minio -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                            milvusUri = "http://${host}:19530"
+                            minioEndpoint = "http://${minioHost}:9000"
+                        }
                         
                         sh """
                         echo "Starting bulk import to Milvus:"
-                        echo "Milvus Host: ${host}"
-                        echo "MinIO Host: ${minioHost}"
+                        echo "Milvus URI: ${milvusUri}"
+                        echo "MinIO Endpoint: ${minioEndpoint}"
+                        echo "MinIO Bucket: ${minioBucket}"
                         echo "Data Path: ${outputPath}"
                         
                         # Import data to Milvus via MinIO from current workspace
                         pdm run milvus-ingest to-milvus import \\
                             --local-path ${outputPath} \\
                             --s3-path test-data/${env.BUILD_ID} \\
-                            --bucket milvus-bucket \\
-                            --endpoint-url http://${minioHost}:9000 \\
-                            --access-key-id minioadmin \\
-                            --secret-access-key minioadmin \\
-                            --uri http://${host}:19530 \\
+                            --bucket ${minioBucket} \\
+                            --endpoint-url ${minioEndpoint} \\
+                            --access-key-id ${minioAccessKey} \\
+                            --secret-access-key ${minioSecretKey} \\
+                            --uri ${milvusUri} \\
                             --drop-if-exists \\
                             --wait \\
                             --timeout 4800
@@ -321,17 +400,24 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 container('main') {
                     script {
                         def outputPath = "/root/milvus_ingest_data/${env.BUILD_ID}"
-                        def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                        def milvusUri = ""
+                        
+                        if (params.use_existing_instance) {
+                            milvusUri = params.milvus_uri
+                        } else {
+                            def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                            milvusUri = "http://${host}:19530"
+                        }
                         
                         sh """
                         echo "Starting data verification:"
-                        echo "Milvus Host: ${host}"
+                        echo "Milvus URI: ${milvusUri}"
                         echo "Data Path: ${outputPath}"
                         
                         # Verify imported data from current workspace
                         pdm run milvus-ingest to-milvus verify \\
                             ${outputPath} \\
-                            --uri http://${host}:19530 \\
+                            --uri ${milvusUri} \\
                             --level full
                         
                         echo "Verification completed successfully"
@@ -347,25 +433,27 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             echo 'Upload logs and cleanup'
             container('main') {
                 script {
-                    echo "Get pod status"
-                    sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
-                    
-                    // Collect logs using kubectl
-                    sh """
-                    mkdir -p k8s_log/${env.RELEASE_NAME}
-                    kubectl logs -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --all-containers=true --tail=-1 > k8s_log/${env.RELEASE_NAME}/milvus-logs.txt || true
-                    kubectl describe pods -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} > k8s_log/${env.RELEASE_NAME}/pod-descriptions.txt || true
-                    """
+                    if (params.use_existing_instance == false) {
+                        echo "Get pod status"
+                        sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
+                        
+                        // Collect logs using kubectl
+                        sh """
+                        mkdir -p k8s_log/${env.RELEASE_NAME}
+                        kubectl logs -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --all-containers=true --tail=-1 > k8s_log/${env.RELEASE_NAME}/milvus-logs.txt || true
+                        kubectl describe pods -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} > k8s_log/${env.RELEASE_NAME}/pod-descriptions.txt || true
+                        """
 
-                    // Archive logs
-                    sh "tar -zcvf artifacts-${env.RELEASE_NAME}-server-logs.tar.gz k8s_log/ --remove-files || true"
+                        // Archive logs
+                        sh "tar -zcvf artifacts-${env.RELEASE_NAME}-server-logs.tar.gz k8s_log/ --remove-files || true"
 
-                    archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-server-logs.tar.gz", allowEmptyArchive: true
+                        archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-server-logs.tar.gz", allowEmptyArchive: true
+                    }
 
                     // Cleanup test data
                     sh "rm -rf ${env.DATA_PATH} || true"
 
-                    if ("${params.keep_env}" == "false") {
+                    if ("${params.keep_env}" == "false" && params.use_existing_instance == false) {
                         sh "helm uninstall ${env.RELEASE_NAME} -n ${env.NAMESPACE} || true"
                     }
                 }
@@ -384,7 +472,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                     echo "Partitions: ${params.partition_count}"
                     echo "Shards: ${params.shard_count}"
 
-                    if ("${params.keep_env}" == "false") {
+                    if ("${params.keep_env}" == "false" && params.use_existing_instance == false) {
                         sh "helm uninstall ${env.RELEASE_NAME} -n ${env.NAMESPACE} || true"
                     }
                 }
