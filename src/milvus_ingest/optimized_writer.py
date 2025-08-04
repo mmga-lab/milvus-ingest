@@ -866,9 +866,12 @@ def _generate_files_parallel(
     progress_callback: Any,
     start_time: float,
     estimation_stats: dict[str, Any],
-) -> list[str]:
+) -> tuple[list[str], int]:
     """
     Generate multiple files in parallel using ProcessPoolExecutor.
+    
+    Returns:
+        tuple[list[str], int]: A tuple containing (list of created file paths, actual total rows generated)
     """
     import threading
 
@@ -1090,42 +1093,48 @@ def _generate_files_parallel(
         f"✅ Parallel generation completed: {len(all_files_created)} files, {rows:,} rows, {total_time:.2f}s ({rows / total_time:.0f} rows/sec)"
     )
 
-    # Always run lightweight validation
-    print("📊 Starting file validation process...")
-    from .lightweight_validator import LightweightValidator
+    # Always run minimal validation (only checks file readability and count)
+    print("📊 Starting minimal file validation...")
+    from .minimal_validator import MinimalValidator
     from rich.console import Console
 
     try:
         # Create validator
         console = Console()
-        validator = LightweightValidator(output_dir, console)
-        
+        validator = MinimalValidator(output_dir, console)
+
         # Run validation
-        print("🔍 Running lightweight file validation...")
-        logger.info("Running lightweight file validation...")
-        validation_results = validator.validate(sample_rows=100)
-        
+        print("🔍 Running minimal validation (schema + count)...")
+        logger.info("Running minimal file validation...")
+        validation_results = validator.validate()
+
         # Display results
         validator.display_results(validation_results)
-        
+
         # Log validation status with higher visibility
         if validation_results["valid"]:
-            print(f"✅ File validation passed: {validation_results['summary']['total_files']} files, {validation_results['summary']['total_rows']:,} rows")
+            print(
+                f"✅ File validation passed: {validation_results['summary']['total_files']} files, {validation_results['summary']['total_rows']:,} rows"
+            )
             logger.info("✅ File validation passed")
         else:
-            print(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
-            logger.warning(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
+            print(
+                f"⚠️ File validation failed with {len(validation_results['errors'])} errors"
+            )
+            logger.warning(
+                f"⚠️ File validation failed with {len(validation_results['errors'])} errors"
+            )
             # Don't fail the generation, just warn
             for error in validation_results["errors"]:
                 print(f"  - {error}")
                 logger.warning(f"  - {error}")
-                
+
     except Exception as e:
         print(f"❌ Validation failed: {e}")
         logger.warning(f"Failed to run validation: {e}")
         # Don't fail the generation if validation fails
 
-    return all_files_created
+    return all_files_created, rows
 
 
 def _estimate_row_size(fields: list[dict[str, Any]]) -> int:
@@ -1991,7 +2000,9 @@ def generate_data_optimized(
     num_shards: int | None = None,
     file_count: int | None = None,
     num_workers: int | None = None,
-) -> list[str]:
+    chunk_and_merge: bool = False,
+    chunk_size: str = "1GB",
+) -> tuple[list[str], int]:
     """
     Optimized data generation using vectorized NumPy operations with file partitioning.
 
@@ -2006,8 +2017,30 @@ def generate_data_optimized(
     Args:
         max_file_size_mb: Maximum size per file in MB (default: 256MB)
         max_rows_per_file: Maximum rows per file (default: 1M rows)
+    
+    Returns:
+        tuple[list[str], int]: A tuple containing (list of created file paths, actual total rows generated)
     """
     start_time = time.time()
+
+    # Check if chunk-and-merge should be used
+    if chunk_and_merge:
+        return _generate_with_chunk_and_merge(
+            schema_path=schema_path,
+            total_rows=total_rows,
+            output_dir=output_dir,
+            format=format,
+            batch_size=batch_size,
+            seed=seed,
+            file_size=file_size,
+            rows_per_file=rows_per_file,
+            progress_callback=progress_callback,
+            num_partitions=num_partitions,
+            num_shards=num_shards,
+            file_count=file_count,
+            num_workers=num_workers,
+            chunk_size=chunk_size,
+        )
 
     # Load schema
     with open(schema_path) as f:
@@ -2881,39 +2914,229 @@ def generate_data_optimized(
         )
         logger.info(f"Total time: {total_time:.2f}s ({rows / total_time:.0f} rows/sec)")
 
-    # Always run lightweight validation (for serial generation path)
-    print("📊 Starting file validation process (serial path)...")
-    from .lightweight_validator import LightweightValidator
+    # Always run minimal validation (for serial generation path)
+    print("📊 Starting minimal file validation...")
+    from .minimal_validator import MinimalValidator
     from rich.console import Console
 
     try:
         # Create validator
         console = Console()
-        validator = LightweightValidator(output_dir, console)
-        
+        validator = MinimalValidator(output_dir, console)
+
         # Run validation
-        print("🔍 Running lightweight file validation...")
-        logger.info("Running lightweight file validation...")
-        validation_results = validator.validate(sample_rows=100)
-        
+        print("🔍 Running minimal validation (schema + count)...")
+        logger.info("Running minimal file validation...")
+        validation_results = validator.validate()
+
         # Display results
         validator.display_results(validation_results)
-        
+
         # Log validation status with higher visibility
         if validation_results["valid"]:
-            print(f"✅ File validation passed: {validation_results['summary']['total_files']} files, {validation_results['summary']['total_rows']:,} rows")
+            print(
+                f"✅ File validation passed: {validation_results['summary']['total_files']} files, {validation_results['summary']['total_rows']:,} rows"
+            )
             logger.info("✅ File validation passed")
         else:
-            print(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
-            logger.warning(f"⚠️ File validation failed with {len(validation_results['errors'])} errors")
+            print(
+                f"⚠️ File validation failed with {len(validation_results['errors'])} errors"
+            )
+            logger.warning(
+                f"⚠️ File validation failed with {len(validation_results['errors'])} errors"
+            )
             # Don't fail the generation, just warn
             for error in validation_results["errors"]:
                 print(f"  - {error}")
                 logger.warning(f"  - {error}")
-                
+
     except Exception as e:
         print(f"❌ Validation failed: {e}")
         logger.warning(f"Failed to run validation: {e}")
         # Don't fail the generation if validation fails
 
-    return all_files_created
+    return all_files_created, rows
+
+
+def _generate_with_chunk_and_merge(
+    schema_path: Path,
+    total_rows: int,
+    output_dir: Path,
+    format: str = "parquet",
+    batch_size: int = 50000,
+    seed: int | None = None,
+    file_size: str | None = None,
+    rows_per_file: int = 1000000,
+    progress_callback: Any = None,
+    num_partitions: int | None = None,
+    num_shards: int | None = None,
+    file_count: int | None = None,
+    num_workers: int | None = None,
+    chunk_size: str = "1GB",
+) -> tuple[list[str], int]:
+    """
+    Generate data using chunk-and-merge strategy for better performance on large files.
+
+    This strategy:
+    1. Determines if chunk-and-merge would be beneficial
+    2. Generates multiple smaller chunks in parallel
+    3. Merges chunks into final large files
+    4. Cleans up temporary files
+    """
+    from .file_merger import FileMerger
+    import tempfile
+    import shutil
+
+    start_time = time.time()
+    logger.info("🚀 Using chunk-and-merge strategy for large file generation")
+
+    # Parse chunk size
+    chunk_size_bytes = _parse_file_size(chunk_size)
+    target_file_size_bytes = (
+        _parse_file_size(file_size) if file_size else (256 * 1024 * 1024)
+    )  # 256MB default
+
+    # Determine if chunk-and-merge is beneficial
+    if target_file_size_bytes < (2 * 1024 * 1024 * 1024):  # Less than 2GB
+        logger.info("Target file size < 2GB, using standard generation instead")
+        # Call original function without chunk_and_merge flag
+        return generate_data_optimized(
+            schema_path=schema_path,
+            total_rows=total_rows,
+            output_dir=output_dir,
+            format=format,
+            batch_size=batch_size,
+            seed=seed,
+            file_size=file_size,
+            rows_per_file=rows_per_file,
+            progress_callback=progress_callback,
+            num_partitions=num_partitions,
+            num_shards=num_shards,
+            file_count=file_count,
+            num_workers=num_workers,
+            chunk_and_merge=False,
+        )
+
+    # Calculate chunk parameters
+    num_chunks = max(1, target_file_size_bytes // chunk_size_bytes)
+    rows_per_chunk = max(1000, total_rows // num_chunks)  # At least 1000 rows per chunk
+
+    logger.info(
+        f"Generating {num_chunks} chunks of ~{chunk_size} each ({rows_per_chunk:,} rows per chunk)"
+    )
+
+    # Create temporary directory for chunks
+    temp_dir = output_dir / ".chunks_temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Generate all chunks in parallel
+        chunk_files = []
+        remaining_rows = total_rows
+
+        for i in range(num_chunks):
+            chunk_rows = min(rows_per_chunk, remaining_rows)
+            if chunk_rows <= 0:
+                break
+
+            chunk_seed = (seed + i * 10000) if seed else None
+            chunk_output_dir = temp_dir / f"chunk_{i:05d}"
+
+            logger.info(
+                f"Generating chunk {i + 1}/{num_chunks} with {chunk_rows:,} rows"
+            )
+
+            # Generate chunk with adjusted parameters for small chunks
+            chunk_files_created, chunk_actual_rows = generate_data_optimized(
+                schema_path=schema_path,
+                total_rows=chunk_rows,
+                output_dir=chunk_output_dir,
+                format=format,
+                batch_size=batch_size,
+                seed=chunk_seed,
+                file_size=chunk_size,  # Each chunk should be ~chunk_size
+                rows_per_file=chunk_rows,  # Single file per chunk
+                progress_callback=None,  # Disable individual progress bars
+                num_partitions=num_partitions,
+                num_shards=num_shards,
+                file_count=None,
+                num_workers=num_workers,
+                chunk_and_merge=False,  # Prevent recursion
+            )
+
+            # Add chunk files to our list
+            for chunk_file_path in chunk_files_created:
+                chunk_files.append(Path(chunk_file_path))
+
+            remaining_rows -= chunk_rows
+
+        logger.info(f"Generated {len(chunk_files)} chunk files, now merging...")
+
+        # Merge chunks into final file(s)
+        merger = FileMerger(temp_dir=temp_dir)
+        final_files = []
+
+        if file_count and file_count > 1:
+            # Multiple output files: distribute chunks across files
+            chunks_per_file = len(chunk_files) // file_count
+            extra_chunks = len(chunk_files) % file_count
+
+            chunk_idx = 0
+            for file_idx in range(file_count):
+                file_chunks_count = chunks_per_file + (
+                    1 if file_idx < extra_chunks else 0
+                )
+                file_chunk_list = chunk_files[chunk_idx : chunk_idx + file_chunks_count]
+
+                if file_chunk_list:
+                    final_filename = (
+                        f"data-{file_idx + 1:05d}-of-{file_count:05d}.{format}"
+                    )
+                    final_file_path = output_dir / final_filename
+
+                    merge_stats = merger.merge_files(
+                        chunk_files=file_chunk_list,
+                        output_file=final_file_path,
+                        file_format=format,
+                        cleanup_chunks=False,  # Do not cleanup yet
+                    )
+
+                    final_files.append(str(final_file_path))
+                    logger.info(
+                        f"Merged {merge_stats['chunks_merged']} chunks into {final_filename}"
+                    )
+
+                chunk_idx += file_chunks_count
+        else:
+            # Single output file
+            final_filename = f"data.{format}"
+            final_file_path = output_dir / final_filename
+
+            merge_stats = merger.merge_files(
+                chunk_files=chunk_files,
+                output_file=final_file_path,
+                file_format=format,
+                cleanup_chunks=False,  # Do not cleanup yet
+            )
+
+            final_files.append(str(final_file_path))
+            logger.info(
+                f"Merged {merge_stats['chunks_merged']} chunks into {final_filename}"
+            )
+
+        total_time = time.time() - start_time
+        logger.info(f"Chunk-and-merge completed in {total_time:.1f}s")
+        logger.info(
+            f"Generated {len(final_files)} final file(s) from {len(chunk_files)} chunks"
+        )
+
+        return final_files, total_rows
+
+    finally:
+        # Always cleanup temporary directory
+        if temp_dir.exists():
+            try:
+                shutil.rmtree(temp_dir)
+                logger.info("Cleaned up temporary chunk files")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temporary directory {temp_dir}: {e}")

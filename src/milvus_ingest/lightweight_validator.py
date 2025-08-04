@@ -138,9 +138,7 @@ class LightweightValidator:
                     f"{results['summary']['total_size_mb']:.2f} MB"
                 )
             else:
-                logger.error(
-                    f"Validation failed with {len(results['errors'])} errors"
-                )
+                logger.error(f"Validation failed with {len(results['errors'])} errors")
 
         except Exception as e:
             results["valid"] = False
@@ -273,7 +271,7 @@ class LightweightValidator:
             sample_size = min(sample_rows, len(data))
             if sample_size > 0:
                 # Check first and last samples
-                samples = data[:sample_size // 2] + data[-(sample_size // 2):]
+                samples = data[: sample_size // 2] + data[-(sample_size // 2) :]
 
                 # Basic validation
                 for i, record in enumerate(samples):
@@ -316,7 +314,10 @@ class LightweightValidator:
 
             if field_name not in df.columns:
                 # Only error if field is not nullable and has no default
-                if not field_def.get("nullable", False) and "default_value" not in field_def:
+                if (
+                    not field_def.get("nullable", False)
+                    and "default_value" not in field_def
+                ):
                     errors.append(f"Missing required field: {field_name}")
 
         # Validate data types for existing columns
@@ -329,16 +330,26 @@ class LightweightValidator:
                 try:
                     if field_type in ["Int8", "Int16", "Int32", "Int64"]:
                         if not pd.api.types.is_integer_dtype(df[col]):
-                            errors.append(f"Field {col} should be integer, got {df[col].dtype}")
+                            errors.append(
+                                f"Field {col} should be integer, got {df[col].dtype}"
+                            )
                     elif field_type == "Float":
                         if not pd.api.types.is_float_dtype(df[col]):
-                            errors.append(f"Field {col} should be float, got {df[col].dtype}")
+                            errors.append(
+                                f"Field {col} should be float, got {df[col].dtype}"
+                            )
                     elif field_type == "Bool":
                         if not pd.api.types.is_bool_dtype(df[col]):
-                            errors.append(f"Field {col} should be boolean, got {df[col].dtype}")
+                            errors.append(
+                                f"Field {col} should be boolean, got {df[col].dtype}"
+                            )
                     elif field_type in ["VarChar", "String"]:
-                        if not pd.api.types.is_string_dtype(df[col]) and not pd.api.types.is_object_dtype(df[col]):
-                            errors.append(f"Field {col} should be string, got {df[col].dtype}")
+                        if not pd.api.types.is_string_dtype(
+                            df[col]
+                        ) and not pd.api.types.is_object_dtype(df[col]):
+                            errors.append(
+                                f"Field {col} should be string, got {df[col].dtype}"
+                            )
                 except Exception as e:
                     errors.append(f"Type validation error for {col}: {e}")
 

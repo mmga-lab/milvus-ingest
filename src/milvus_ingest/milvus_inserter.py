@@ -117,7 +117,10 @@ class MilvusInserter:
         if not collection_exists:
             # Use unified schema builder to create collection
             self.schema_builder.create_collection_with_schema(
-                final_collection_name, metadata, drop_if_exists=False, use_flat_index=use_flat_index
+                final_collection_name,
+                metadata,
+                drop_if_exists=False,
+                use_flat_index=use_flat_index,
             )
 
         # Find data files (parquet or json)
@@ -468,14 +471,18 @@ class MilvusInserter:
 
         elif field_type in ["Float", "Double"]:
             # Convert to Python float
-            if isinstance(value, (float, np.floating)) or isinstance(value, (int, np.integer)):
+            if isinstance(value, (float, np.floating)) or isinstance(
+                value, (int, np.integer)
+            ):
                 return float(value)
             else:
                 return float(value) if value is not None else None
 
         elif field_type == "Bool":
             # Convert to Python bool
-            if isinstance(value, (bool, np.bool_)) or isinstance(value, (int, np.integer)):
+            if isinstance(value, (bool, np.bool_)) or isinstance(
+                value, (int, np.integer)
+            ):
                 return bool(value)
             else:
                 return bool(value) if value is not None else None
