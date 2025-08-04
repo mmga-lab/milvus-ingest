@@ -1,13 +1,11 @@
 """File merger module for combining chunked data files."""
 
 import json
-import shutil
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from loguru import logger

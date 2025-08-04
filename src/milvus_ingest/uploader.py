@@ -15,13 +15,6 @@ import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
 
 from .logging_config import get_logger
 from .rich_display import display_error, display_info
@@ -223,101 +216,53 @@ class S3Uploader:
             f for f in files_to_upload if f.stat().st_size > large_file_threshold
         }
 
+        # Upload files (simplified without progress bar)
         if show_progress:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            ) as progress:
-                task = progress.add_task(
-                    f"Uploading {len(files_to_upload)} files",
-                    total=len(files_to_upload),
-                )
+            print(f"☁️ Uploading {len(files_to_upload)} files to S3...")
+        
+        for i, file_path in enumerate(files_to_upload, 1):
+            # Show progress periodically
+            if show_progress and i % 5 == 0:
+                progress_pct = 100.0 * i / len(files_to_upload)
+                print(f"📊 Upload progress: {i}/{len(files_to_upload)} files ({progress_pct:.1f}%)")
+            
+            # Calculate S3 key
+            relative_path = file_path.relative_to(local_path)
+            relative_path_str = str(relative_path).replace(
+                "\\", "/"
+            )  # Convert to forward slashes
 
-                for file_path in files_to_upload:
-                    # Calculate S3 key
-                    relative_path = file_path.relative_to(local_path)
-                    relative_path_str = str(relative_path).replace(
-                        "\\", "/"
-                    )  # Convert to forward slashes
+            # Build S3 key, ensuring no double slashes
+            if prefix:
+                # Remove trailing slash from prefix if present
+                clean_prefix = prefix.rstrip("/")
+                s3_key = f"{clean_prefix}/{relative_path_str}"
+            else:
+                s3_key = relative_path_str
 
-                    # Build S3 key, ensuring no double slashes
-                    if prefix:
-                        # Remove trailing slash from prefix if present
-                        clean_prefix = prefix.rstrip("/")
-                        s3_key = f"{clean_prefix}/{relative_path_str}"
-                    else:
-                        s3_key = relative_path_str
+            try:
+                # Log large file uploads
+                if file_path in large_files:
+                    file_size_gb = file_path.stat().st_size / (1024**3)
+                    self.logger.info(
+                        f"Uploading large file: {file_path.name} ({file_size_gb:.1f}GB) "
+                        f"using multipart upload with integrity verification"
+                    )
 
-                    try:
-                        # Log large file uploads
-                        if file_path in large_files:
-                            file_size_gb = file_path.stat().st_size / (1024**3)
-                            self.logger.info(
-                                f"Uploading large file: {file_path.name} ({file_size_gb:.1f}GB) "
-                                f"using multipart upload with integrity verification"
-                            )
-
-                        upload_result = self._upload_file(file_path, bucket, s3_key)
-                        if (
-                            upload_result["success"]
-                            and upload_result["integrity_valid"]
-                        ):
-                            uploaded_files += 1
-                        else:
-                            failed_files.append(
-                                {
-                                    "file": str(file_path),
-                                    "error": "Upload integrity verification failed",
-                                    "details": upload_result,
-                                }
-                            )
-                        progress.update(task, advance=1)
-                    except Exception as e:
-                        self.logger.error(f"Failed to upload {file_path}: {e}")
-                        failed_files.append({"file": str(file_path), "error": str(e)})
-                        progress.update(task, advance=1)
-        else:
-            # Upload without progress bar
-            for file_path in files_to_upload:
-                relative_path = file_path.relative_to(local_path)
-                relative_path_str = str(relative_path).replace(
-                    "\\", "/"
-                )  # Convert to forward slashes
-
-                # Build S3 key, ensuring no double slashes
-                if prefix:
-                    # Remove trailing slash from prefix if present
-                    clean_prefix = prefix.rstrip("/")
-                    s3_key = f"{clean_prefix}/{relative_path_str}"
+                upload_result = self._upload_file(file_path, bucket, s3_key)
+                if upload_result["success"] and upload_result["integrity_valid"]:
+                    uploaded_files += 1
                 else:
-                    s3_key = relative_path_str
-
-                try:
-                    # Log large file uploads
-                    if file_path in large_files:
-                        file_size_gb = file_path.stat().st_size / (1024**3)
-                        self.logger.info(
-                            f"Uploading large file: {file_path.name} ({file_size_gb:.1f}GB) "
-                            f"using multipart upload with integrity verification"
-                        )
-
-                    upload_result = self._upload_file(file_path, bucket, s3_key)
-                    if upload_result["success"] and upload_result["integrity_valid"]:
-                        uploaded_files += 1
-                    else:
-                        failed_files.append(
-                            {
-                                "file": str(file_path),
-                                "error": "Upload integrity verification failed",
-                                "details": upload_result,
-                            }
-                        )
-                except Exception as e:
-                    self.logger.error(f"Failed to upload {file_path}: {e}")
-                    failed_files.append({"file": str(file_path), "error": str(e)})
+                    failed_files.append(
+                        {
+                            "file": str(file_path),
+                            "error": "Upload integrity verification failed",
+                            "details": upload_result,
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"Failed to upload {file_path}: {e}")
+                failed_files.append({"file": str(file_path), "error": str(e)})
 
         # Run minimal validation if all uploads succeeded
         validation_results = None

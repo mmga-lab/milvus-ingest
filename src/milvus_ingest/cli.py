@@ -28,15 +28,6 @@ from pathlib import Path
 from typing import Any
 
 import click
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
 
 from .cache_manager import CacheManager
 from .logging_config import (
@@ -1837,54 +1828,35 @@ def _save_with_high_performance_generator(
                 log_level="WARNING",  # Suppress INFO messages during progress
             )
 
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TimeRemainingColumn(),
-                TimeElapsedColumn(),
-                console=Console(stderr=True),  # Use stderr for progress output
-            ) as progress:
-                # Reconfigure logging to use Rich's console for proper coordination
-                setup_logging(
-                    verbose=verbose,
-                    log_level="WARNING",  # Keep WARNING level during progress
-                    rich_console=progress.console,
-                )
+            # Generate data (simplified without progress bar)
+            print("🚀 Generating data with high-performance mode...")
+            
+            # Simple progress callback for print-based progress
+            def update_progress(completed_rows: int) -> None:
+                if completed_rows % 50000 == 0:  # Print every 50k rows
+                    progress_pct = 100.0 * completed_rows / total_rows
+                    print(f"📊 Progress: {completed_rows:,}/{total_rows:,} rows ({progress_pct:.1f}%)")
 
-                task = progress.add_task(
-                    "Generating data with high-performance mode...", total=total_rows
-                )
+            # Run optimized generator with progress callback
+            files_created, actual_total_rows = generate_data_optimized(
+                schema_path=schema_path,
+                total_rows=total_rows,
+                output_dir=output_path,
+                format=fmt,
+                batch_size=optimized_batch_size,
+                seed=seed,
+                file_size=file_size,
+                rows_per_file=rows_per_file,
+                num_partitions=num_partitions,
+                num_shards=num_shards,
+                file_count=file_count,
+                num_workers=num_workers,
+                progress_callback=update_progress,
+                chunk_and_merge=chunk_and_merge,
+                chunk_size=chunk_size,
+            )
 
-                # Progress callback to update the progress bar
-                def update_progress(completed_rows: int) -> None:
-                    progress.update(task, completed=completed_rows)
-
-                # Run optimized generator with progress callback
-                files_created, actual_total_rows = generate_data_optimized(
-                    schema_path=schema_path,
-                    total_rows=total_rows,
-                    output_dir=output_path,
-                    format=fmt,
-                    batch_size=optimized_batch_size,
-                    seed=seed,
-                    file_size=file_size,
-                    rows_per_file=rows_per_file,
-                    num_partitions=num_partitions,
-                    num_shards=num_shards,
-                    file_count=file_count,
-                    num_workers=num_workers,
-                    progress_callback=update_progress,
-                    chunk_and_merge=chunk_and_merge,
-                    chunk_size=chunk_size,
-                )
-
-                # Ensure progress shows 100% at the end
-                progress.update(task, completed=actual_total_rows)
-
-            # Restore original logging configuration after progress bar is closed
-            setup_logging(verbose=verbose, log_level="DEBUG" if verbose else "INFO")
+            print(f"✅ Generation completed: {actual_total_rows:,} rows")
 
             # Show completion summary after progress bar
             from rich.console import Console

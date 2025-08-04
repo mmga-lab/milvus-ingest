@@ -7,13 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from pymilvus import MilvusClient
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
 
 from .logging_config import get_logger
 from .milvus_schema_builder import MilvusSchemaBuilder
@@ -161,112 +154,62 @@ class MilvusInserter:
                 data_source = data_list
                 total_rows = len(data_list)
 
+            # Insert data in batches
             if show_progress:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TaskProgressColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                ) as progress:
-                    task = progress.add_task(
-                        f"Inserting {data_file.name}", total=total_rows
-                    )
-
-                    # Insert in batches
-                    for i in range(0, total_rows, batch_size):
-                        if file_format == "parquet":
-                            batch_df = data_source.iloc[i : i + batch_size]
-                            try:
-                                # Convert DataFrame to list of dictionaries
-                                data = self._convert_dataframe_to_dict_list(
-                                    batch_df, metadata
-                                )
-                                batch_size_actual = len(batch_df)
-                            except Exception as e:
-                                self.logger.error(
-                                    f"Failed to convert batch {i // batch_size}: {e}"
-                                )
-                                failed_batches.append(
-                                    {
-                                        "file": data_file.name,
-                                        "batch": i // batch_size,
-                                        "error": str(e),
-                                    }
-                                )
-                                progress.update(task, advance=batch_size)
-                                continue
-                        else:  # json format
-                            # For JSON, data is already in the correct format
-                            batch_data = data_source[i : i + batch_size]
-                            data = self._process_json_batch(batch_data, metadata)
-                            batch_size_actual = len(batch_data)
-
-                        try:
-                            # Insert using MilvusClient
-                            self.client.insert(
-                                collection_name=final_collection_name, data=data
-                            )
-                            total_inserted += batch_size_actual
-                            progress.update(task, advance=batch_size_actual)
-                        except Exception as e:
-                            self.logger.error(
-                                f"Failed to insert batch {i // batch_size}: {e}"
-                            )
-                            failed_batches.append(
-                                {
-                                    "file": data_file.name,
-                                    "batch": i // batch_size,
-                                    "error": str(e),
-                                }
-                            )
-                            progress.update(task, advance=batch_size_actual)
-            else:
-                # Insert without progress bar
-                for i in range(0, total_rows, batch_size):
-                    if file_format == "parquet":
-                        batch_df = data_source.iloc[i : i + batch_size]
-                        try:
-                            # Convert DataFrame to list of dictionaries
-                            data = self._convert_dataframe_to_dict_list(
-                                batch_df, metadata
-                            )
-                            batch_size_actual = len(batch_df)
-                        except Exception as e:
-                            self.logger.error(
-                                f"Failed to convert batch {i // batch_size}: {e}"
-                            )
-                            failed_batches.append(
-                                {
-                                    "file": data_file.name,
-                                    "batch": i // batch_size,
-                                    "error": str(e),
-                                }
-                            )
-                            continue
-                    else:  # json format
-                        # For JSON, data is already in the correct format
-                        batch_data = data_source[i : i + batch_size]
-                        data = self._process_json_batch(batch_data, metadata)
-                        batch_size_actual = len(batch_data)
-
+                print(f"📥 Inserting {data_file.name} ({total_rows:,} rows)...")
+            
+            total_batches = (total_rows + batch_size - 1) // batch_size
+            for i in range(0, total_rows, batch_size):
+                batch_num = i // batch_size + 1
+                
+                # Show progress periodically
+                if show_progress and batch_num % 10 == 0:
+                    progress_pct = 100.0 * i / total_rows
+                    print(f"📊 Progress: {i:,}/{total_rows:,} rows ({progress_pct:.1f}%)")
+                
+                if file_format == "parquet":
+                    batch_df = data_source.iloc[i : i + batch_size]
                     try:
-                        # Insert using MilvusClient
-                        self.client.insert(
-                            collection_name=final_collection_name, data=data
+                        # Convert DataFrame to list of dictionaries
+                        data = self._convert_dataframe_to_dict_list(
+                            batch_df, metadata
                         )
-                        total_inserted += batch_size_actual
+                        batch_size_actual = len(batch_df)
                     except Exception as e:
                         self.logger.error(
-                            f"Failed to insert batch {i // batch_size}: {e}"
+                            f"Failed to convert batch {batch_num}: {e}"
                         )
                         failed_batches.append(
                             {
                                 "file": data_file.name,
-                                "batch": i // batch_size,
+                                "batch": batch_num,
                                 "error": str(e),
                             }
                         )
+                        continue
+                else:  # json format
+                    # For JSON, data is already in the correct format
+                    batch_data = data_source[i : i + batch_size]
+                    data = self._process_json_batch(batch_data, metadata)
+                    batch_size_actual = len(batch_data)
+
+                try:
+                    # Insert using MilvusClient
+                    self.client.insert(
+                        collection_name=final_collection_name, data=data
+                    )
+                    total_inserted += batch_size_actual
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to insert batch {batch_num}: {e}"
+                    )
+                    failed_batches.append(
+                        {
+                            "file": data_file.name,
+                            "batch": batch_num,
+                            "error": str(e),
+                        }
+                    )
 
         # Flush data
         self.client.flush(collection_name=final_collection_name)
