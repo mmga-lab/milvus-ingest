@@ -185,12 +185,12 @@ def main(ctx: click.Context, verbose: bool = False) -> None:
 @click.option(
     "--chunk-and-merge",
     is_flag=True,
-    help="For large files (>2GB), generate smaller chunks in parallel then merge. Improves performance for large single files.",
+    help="Generate smaller chunks in parallel then merge. Auto-enabled for files >=2GB. Improves performance for large single files.",
 )
 @click.option(
     "--chunk-size",
-    default="1GB",
-    help="Size of each chunk when using --chunk-and-merge (e.g., '1GB', '500MB'). Default: 1GB.",
+    default="512MB",
+    help="Size of each chunk when using --chunk-and-merge (e.g., '512MB', '1GB'). Default: 512MB.",
 )
 @click.option(
     "--use-cache",
@@ -223,7 +223,7 @@ def generate(
     num_shards: int | None = None,
     num_workers: int | None = None,
     chunk_and_merge: bool = False,
-    chunk_size: str = "1GB",
+    chunk_size: str = "512MB",
     use_cache: bool = False,
     force_regenerate: bool = False,
 ) -> None:
@@ -399,9 +399,37 @@ def generate(
             collection_name = validated_schema.collection_name
             schema_display_name = collection_name or schema_path.stem
 
+        # Calculate effective total rows for display
+        # Check if both file_count and file_size are specified (rows will be calculated)
+        if file_count and file_size:
+            effective_display_rows = 0  # Will be calculated
+        else:
+            effective_display_rows = total_rows
+        
+        # If both file_count and file_size are specified, estimate total rows for display
+        if file_count and file_size and effective_display_rows == 0:
+            try:
+                # Import here to avoid circular imports
+                from .optimized_writer import _enhanced_estimate_row_size_from_sample, _parse_file_size
+                
+                # Quick estimation for display purposes
+                sample_size = min(1000, 5000)  # Smaller sample for speed
+                estimated_bytes_per_row, _ = _enhanced_estimate_row_size_from_sample(
+                    fields, sample_size, 0, output_format, {"fields": fields}, seed, num_iterations=1
+                )
+                
+                # Parse file size and calculate rows
+                file_size_bytes = _parse_file_size(file_size)
+                rows_per_file = int(file_size_bytes / estimated_bytes_per_row)
+                estimated_total_rows = rows_per_file * file_count
+                
+                effective_display_rows = f"~{estimated_total_rows:,} (calculated)"
+            except Exception:
+                effective_display_rows = f"calculated ({file_count} × {file_size})"
+        
         # Display schema preview
         generation_config = {
-            "total_rows": total_rows,
+            "total_rows": effective_display_rows,
             "batch_size": batch_size,
             "seed": seed,
             "format": output_format,
@@ -451,6 +479,7 @@ def generate(
                         rows_per_file=preview_rows,
                         file_size=None,  # Don't use size controls for preview
                         file_count=None,
+                        skip_validation=True,  # Skip validation for preview
                     )
 
                     if files_created:
@@ -611,12 +640,22 @@ def generate(
                 )
                 logger.warning(f"Cache retrieval failed for key {cache_key}")
 
+    # Handle file-count + file-size parameter conflict
+    # When both are specified, total_rows should be calculated by the generator
+    effective_total_rows = total_rows
+    if file_count and file_size:
+        logger.info(
+            "Both --file-count and --file-size specified. Total rows will be calculated based on file sizes."
+        )
+        # Use a special value to indicate rows should be calculated
+        effective_total_rows = 0  # This tells the generator to calculate rows
+    
     # Use high-performance data generation (default and only mode)
     logger.info(
         "Starting high-performance data generation",
         output_dir=str(output_path),
         format=output_format,
-        rows=total_rows,
+        rows=effective_total_rows if effective_total_rows > 0 else "calculated",
     )
     try:
         # High-performance parallel generator (default and only mode)
@@ -629,7 +668,7 @@ def generate(
 
         actual_total_rows = _save_with_high_performance_generator(
             schema_path,
-            total_rows,
+            effective_total_rows,
             output_path,
             output_format,
             batch_size=batch_size,
@@ -1186,6 +1225,11 @@ def cache_stats() -> None:
     is_flag=True,
     help="Disable progress bar during upload",
 )
+@click.option(
+    "--use-boto3",
+    is_flag=True,
+    help="Use boto3 instead of AWS CLI for uploads (AWS CLI is default and more reliable)",
+)
 def upload(
     local_path: Path,
     s3_path: str,
@@ -1195,6 +1239,7 @@ def upload(
     region: str = "us-east-1",
     no_verify_ssl: bool = False,
     no_progress: bool = False,
+    use_boto3: bool = False,
 ) -> None:
     """Upload generated data files to S3/MinIO.
 
@@ -1221,6 +1266,7 @@ def upload(
             secret_access_key=secret_access_key,
             region_name=region,
             verify_ssl=not no_verify_ssl,
+            use_aws_cli=not use_boto3,
         )
 
         # Test connection
@@ -1677,6 +1723,11 @@ def verify_milvus_data(
     is_flag=True,
     help="Use AUTOINDEX for dense vector fields (faster but ~90-95% recall, overrides default FLAT index)",
 )
+@click.option(
+    "--use-boto3",
+    is_flag=True,
+    help="Use boto3 instead of AWS CLI for uploads (AWS CLI is default and more reliable)",
+)
 def import_to_milvus(
     collection_name: str | None,
     local_path: Path,
@@ -1692,6 +1743,7 @@ def import_to_milvus(
     timeout: int | None = None,
     drop_if_exists: bool = False,
     use_autoindex: bool = False,
+    use_boto3: bool = False,
 ) -> None:
     """Upload data to S3/MinIO and bulk import to Milvus in one step.
 
@@ -1742,6 +1794,7 @@ def import_to_milvus(
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             verify_ssl=not no_verify_ssl,
+            use_aws_cli=not use_boto3,
         )
 
         # Ensure s3_path ends with /
@@ -1820,7 +1873,7 @@ def _save_with_high_performance_generator(
     num_workers: int | None = None,
     verbose: bool = False,
     chunk_and_merge: bool = False,
-    chunk_size: str = "1GB",
+    chunk_size: str = "512MB",
 ) -> int:
     """Save using high-performance vectorized generator optimized for large-scale data.
 
@@ -1873,6 +1926,7 @@ def _save_with_high_performance_generator(
                 progress_callback=update_progress,
                 chunk_and_merge=chunk_and_merge,
                 chunk_size=chunk_size,
+                skip_validation=False,  # Always validate final output
             )
 
             print(f"✅ Generation completed: {actual_total_rows:,} rows")
@@ -1901,6 +1955,7 @@ def _save_with_high_performance_generator(
                 num_workers=num_workers,
                 chunk_and_merge=chunk_and_merge,
                 chunk_size=chunk_size,
+                skip_validation=False,  # Always validate final output
             )
 
         # Log performance metrics

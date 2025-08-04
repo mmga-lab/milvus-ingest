@@ -96,10 +96,12 @@ milvus-ingest generate --schema schema.json --total-rows 5000000 --partitions 10
 # Worker configuration for parallel processing
 milvus-ingest generate --schema schema.json --total-rows 10000000 --workers 8  # Use 8 parallel workers
 
-# Chunk-and-merge strategy for large files (improves performance for >2GB files)
-milvus-ingest generate --schema schema.json --file-size 10GB --chunk-and-merge  # Generate 10GB file using chunks
-milvus-ingest generate --schema schema.json --file-size 5GB --chunk-and-merge --chunk-size 500MB  # Custom chunk size
-milvus-ingest generate --schema schema.json --file-count 3 --file-size 8GB --chunk-and-merge  # Multiple large files
+# Chunk-and-merge strategy for large files (auto-enabled for >=2GB files)
+# Note: chunk-and-merge is automatically enabled for files >= 2GB to improve performance
+milvus-ingest generate --schema schema.json --file-size 10GB  # Auto-uses chunk-and-merge for 10GB file
+milvus-ingest generate --schema schema.json --file-size 5GB --chunk-size 500MB  # Auto-enabled with custom chunk size
+milvus-ingest generate --schema schema.json --file-count 3 --file-size 8GB  # Auto-enabled for multiple large files
+milvus-ingest generate --schema schema.json --file-size 1GB --chunk-and-merge  # Manually enable for files <2GB
 
 # Additional generation options
 milvus-ingest generate --schema schema.json --validate-only            # Validate schema without generating
@@ -129,10 +131,12 @@ milvus-ingest cache clean <cache_key1> <cache_key2> # Remove specific caches
 milvus-ingest clean                         # Clean up generated files
 
 # Upload to S3/MinIO (standalone upload, useful for separate upload/import workflow)
-milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/              # Upload to AWS S3
-milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --endpoint-url http://localhost:9000  # Upload to MinIO
+# Note: AWS CLI is now the default upload method (more reliable for large files)
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/              # Upload to AWS S3 (uses AWS CLI by default)
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --endpoint-url http://localhost:9000  # Upload to MinIO (uses AWS CLI by default)
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --no-verify-ssl  # Disable SSL verification
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --access-key-id KEY --secret-access-key SECRET  # With credentials
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --use-boto3   # Use boto3 instead of AWS CLI (legacy mode)
 
 # Send data to Milvus
 # Direct insert to Milvus (reads local parquet and JSON files and creates collection)
@@ -142,14 +146,16 @@ milvus-ingest to-milvus insert ./output --drop-if-exists               # Drop ex
 milvus-ingest to-milvus insert ./output --collection-name my_collection --batch-size 5000  # Custom settings
 milvus-ingest to-milvus insert ./output --use-autoindex                # Use AUTOINDEX for better performance (lower recall)
 
-# Bulk import to Milvus (upload + import in one step)
+# Bulk import to Milvus (upload + import in one step)  
 # Note: Combines upload and import for convenience, includes auto-collection creation
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000  # Upload and import (uses FLAT index by default)
+# Note: AWS CLI is now the default upload method (more reliable for large files)
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000  # Upload and import (uses AWS CLI + FLAT index by default)
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --collection-name my_collection  # Override collection name
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait  # Wait for completion
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret  # With credentials
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --drop-if-exists  # Drop and recreate
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-autoindex  # Use AUTOINDEX for better performance
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-boto3  # Use boto3 instead of AWS CLI (legacy mode)
 
 # Verify data in Milvus
 # Comprehensive verification system with three levels (all include query/search correctness tests)
@@ -202,6 +208,57 @@ The validation system performs three essential checks:
 3. **Size Verification**: Does the file size match exactly? (proves upload integrity)
 
 This multi-layered approach ensures complete data integrity from generation through upload while maintaining high performance.
+
+## AWS CLI Integration (Default Upload Method)
+
+### Automatic Installation
+The system now uses AWS CLI as the default upload method for better reliability, especially with large files. If AWS CLI is not installed, the tool will automatically attempt to install it:
+
+```bash
+# AWS CLI will be automatically installed if not found
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/
+
+# Installation attempts (in order), all using --user flag for permission-free install:
+# 1. pip install awscli --upgrade --user
+# 2. pip3 install awscli --upgrade --user  
+# 3. python -m pip install awscli --upgrade --user
+```
+
+**Key Features:**
+- **Permission-Free**: Uses `--user` flag to install in user directory
+- **Auto PATH Setup**: Automatically adds AWS CLI to PATH for current session
+- **PATH Guidance**: Provides instructions to add to PATH permanently
+- **Cross-Platform**: Works on Windows, macOS, and Linux
+
+### Fallback Options
+If automatic installation fails, you can:
+1. **Manual Installation**: `pip install awscli --upgrade --user`
+2. **Use boto3 Legacy Mode**: Add `--use-boto3` flag to use the previous method
+
+### Example PATH Setup Output
+When AWS CLI is installed with `--user`, you'll see guidance like:
+```
+⚠️  AWS CLI installed to /Users/yourname/.local/bin
+   Add this to your PATH for future sessions:
+   export PATH="/Users/yourname/.local/bin:$PATH"
+```
+
+### Benefits of AWS CLI (Default)
+- **More Reliable**: Better error handling and retry mechanisms
+- **Large File Support**: Optimized for files >1GB with automatic multipart upload
+- **Network Resilience**: Better handling of network interruptions and timeouts
+- **Production Ready**: Battle-tested upload reliability
+- **Automatic Installation**: Zero-configuration setup
+
+### When to Use boto3 Legacy Mode
+- AWS CLI installation issues in restricted environments
+- Specific boto3 compatibility requirements
+- Environments where subprocess execution is restricted
+
+```bash
+# Force boto3 usage (legacy mode)
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/ --use-boto3
+```
 
 ## Architecture Overview
 
