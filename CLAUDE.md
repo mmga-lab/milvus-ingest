@@ -93,10 +93,19 @@ milvus-ingest generate --schema schema.json --total-rows 5000000 --partitions 10
 # Worker configuration for parallel processing
 milvus-ingest generate --schema schema.json --total-rows 10000000 --workers 8  # Use 8 parallel workers
 
+# Chunk-and-merge strategy for large files (improves performance for >2GB files)
+milvus-ingest generate --schema schema.json --file-size 10GB --chunk-and-merge  # Generate 10GB file using chunks
+milvus-ingest generate --schema schema.json --file-size 5GB --chunk-and-merge --chunk-size 500MB  # Custom chunk size
+milvus-ingest generate --schema schema.json --file-count 3 --file-size 8GB --chunk-and-merge  # Multiple large files
+
 # Additional generation options
 milvus-ingest generate --schema schema.json --validate-only            # Validate schema without generating
 milvus-ingest generate --schema schema.json --total-rows 1000000 --no-progress # Disable progress bar
 milvus-ingest generate --schema schema.json --out mydata --force   # Force overwrite existing output
+
+# Cache functionality (reuse previously generated data with identical parameters)
+milvus-ingest generate --schema schema.json --total-rows 1000000 --use-cache           # Enable cache, reuse if available
+milvus-ingest generate --schema schema.json --total-rows 1000000 --force-regenerate    # Force regeneration, update cache
 
 # Schema management commands
 milvus-ingest schema list                    # List all schemas
@@ -104,6 +113,14 @@ milvus-ingest schema show quickstart            # Show schema details
 milvus-ingest schema add myschema file.json # Add custom schema
 milvus-ingest schema remove myschema        # Remove custom schema
 milvus-ingest schema help                   # Schema format help
+
+# Cache management commands
+milvus-ingest cache list                            # List all cached datasets
+milvus-ingest cache info <cache_key>                # Show detailed cache information  
+milvus-ingest cache stats                           # Show cache statistics and usage
+milvus-ingest cache clean --all --yes               # Remove all cached datasets
+milvus-ingest cache clean --older-than 7           # Remove caches older than 7 days
+milvus-ingest cache clean <cache_key1> <cache_key2> # Remove specific caches
 
 # Utility commands
 milvus-ingest clean                         # Clean up generated files
@@ -149,6 +166,28 @@ milvus-ingest to-milvus verify ./output --level full --collection-name my_collec
 milvus-ingest to-milvus verify ./output --level scalar --uri http://remote:19530 --token your-token  # Remote Milvus
 ```
 
+### Validation System
+
+The system includes an automated validation step after data generation to ensure file integrity:
+
+#### Minimal Validation (Default)
+- **File Readability**: Verifies files can be opened and schema can be read
+- **Row Count Verification**: Confirms actual row count matches expected count from meta.json
+- **Performance**: Very fast, only reads file metadata (not actual data)
+- **Coverage**: Validates all generated files for basic integrity
+
+```bash
+# Minimal validation is automatically run after generation
+milvus-ingest generate --builtin quickstart --total-rows 10000
+# Output includes: "✅ File validation passed: 1 files, 10,000 rows"
+```
+
+The minimal validator only performs two essential checks:
+1. **Schema Access**: Can the file be opened and metadata read? (proves file is not corrupted)
+2. **Count Verification**: Does the actual row count match the expected count? (proves file is complete)
+
+This approach is much faster than full data validation while still catching the most common file corruption issues.
+
 ## Architecture Overview
 
 ### Project Structure
@@ -166,9 +205,13 @@ milvus-ingest/
 │   ├── builtin_schemas.py      # Built-in schema definitions and metadata
 │   ├── generator.py            # Legacy generator (for compatibility)
 │   ├── verifier.py             # Comprehensive Milvus data verification system
+│   ├── minimal_validator.py    # Fast file integrity validation (schema + count)
+│   ├── lightweight_validator.py # More thorough validation with sampling (legacy)
+│   ├── file_merger.py          # File merging for chunk-and-merge strategy
 │   ├── rich_display.py         # Rich terminal formatting and progress bars
 │   ├── logging_config.py       # Loguru-based structured logging
 │   ├── exceptions.py           # Custom exception classes
+│   ├── cache_manager.py        # Dataset caching for parameter-based reuse
 │   └── schemas/                # 16 built-in schema JSON files
 ├── tests/                      # Test suite
 │   ├── conftest.py            # Common test fixtures
@@ -201,6 +244,8 @@ This is a high-performance mock data generator for Milvus vector databases with 
 7. **Milvus Integration**: Complete integration with Milvus including collection creation, partition/shard configuration, direct insertion, bulk import from S3/MinIO storage, and comprehensive data verification.
 
 8. **Comprehensive Verification System**: Multi-level verification system that ensures data integrity, field consistency, and functional correctness through automated query and search testing.
+
+9. **Intelligent Caching System**: SHA256-based parameter caching that automatically reuses previously generated datasets when identical generation parameters are detected, dramatically reducing time for repeated operations on large datasets.
 
 ## Key Implementation Details
 
@@ -485,6 +530,45 @@ Options:
 milvus-ingest clean [OPTIONS]          # Clean up generated output files
   --yes, -y                            # Auto-confirm all prompts
 ```
+
+## Cache System Architecture
+
+The caching system provides intelligent reuse of previously generated datasets when identical parameters are used:
+
+### Cache Key Generation
+- **SHA256-based**: Generates deterministic hashes from normalized generation parameters
+- **Parameter Filtering**: Only includes parameters that affect data generation results
+- **Schema Normalization**: JSON schema content is parsed and re-serialized for consistency
+- **Excluded Parameters**: Output paths, progress flags, and UI options don't affect cache keys
+
+### Cache Storage Structure
+```
+~/.milvus-ingest/cache/
+├── <cache_key>/                 # SHA256 hash directory
+│   ├── cache_info.json         # Cache metadata and generation parameters  
+│   ├── meta.json               # Original dataset metadata
+│   └── data-*.parquet          # Cached data files (hard-linked when possible)
+```
+
+### Cache Workflow
+1. **Generation Request**: User runs generate command with `--use-cache`
+2. **Key Generation**: System creates SHA256 hash from normalized parameters
+3. **Cache Check**: Validates cache existence and file integrity
+4. **Cache Hit**: Hard-links or copies files to target directory (seconds vs hours)
+5. **Cache Miss**: Generates data normally, then stores in cache for future use
+
+### Cache Management Features
+- **Intelligent File Operations**: Uses hard links for same-filesystem operations, falls back to copying
+- **Cache Validation**: Checks file existence, size, and metadata consistency
+- **Flexible Cleanup**: Remove by age, size, specific keys, or all caches
+- **Rich Management UI**: Detailed cache listings with creation time, size, and parameters
+- **Partial Key Matching**: Support shortened cache keys for user convenience
+
+### Performance Benefits
+- **Large Dataset Reuse**: Multi-million row datasets cached in seconds instead of hours
+- **Development Workflow**: Rapid iteration on downstream processing without regeneration
+- **CI/CD Optimization**: Consistent test data generation with deterministic caching
+- **Storage Efficiency**: Hard links minimize disk usage when possible
 
 ## Performance Benchmarking
 

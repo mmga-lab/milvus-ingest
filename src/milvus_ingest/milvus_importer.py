@@ -89,7 +89,10 @@ class MilvusBulkImporter:
         if schema_metadata:
             # Use unified schema builder to create collection
             return self.schema_builder.create_collection_with_schema(
-                collection_name, schema_metadata, drop_if_exists=False, use_flat_index=use_flat_index
+                collection_name,
+                schema_metadata,
+                drop_if_exists=False,
+                use_flat_index=use_flat_index,
             )
         else:
             raise ValueError(
@@ -168,7 +171,10 @@ class MilvusBulkImporter:
                 if metadata:
                     # Use unified schema builder to create collection if needed
                     self.schema_builder.create_collection_with_schema(
-                        collection_name, metadata, drop_if_exists=drop_if_exists, use_flat_index=use_flat_index
+                        collection_name,
+                        metadata,
+                        drop_if_exists=drop_if_exists,
+                        use_flat_index=use_flat_index,
                     )
                 else:
                     # Just check if collection exists

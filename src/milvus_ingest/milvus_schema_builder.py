@@ -151,7 +151,9 @@ class MilvusSchemaBuilder:
 
         return schema
 
-    def create_index_params_from_metadata(self, metadata: dict[str, Any], use_flat_index: bool = True) -> Any:
+    def create_index_params_from_metadata(
+        self, metadata: dict[str, Any], use_flat_index: bool = True
+    ) -> Any:
         """Create index parameters from metadata.
 
         Args:
@@ -189,12 +191,16 @@ class MilvusSchemaBuilder:
 
                     # Add index for vector field
                     # FLAT index only applies to dense vector fields (FloatVector, Float16Vector, BFloat16Vector)
-                    if use_flat_index and field_type in ["FloatVector", "Float16Vector", "BFloat16Vector"]:
+                    if use_flat_index and field_type in [
+                        "FloatVector",
+                        "Float16Vector",
+                        "BFloat16Vector",
+                    ]:
                         # Use FLAT index for dense vectors (100% recall accuracy)
                         index_params.add_index(
                             field_name=field_name,
                             index_type="FLAT",
-                            metric_type=metric_type
+                            metric_type=metric_type,
                         )
                     else:
                         # Use AUTOINDEX for BinaryVector and other types, or when FLAT is disabled
@@ -243,7 +249,9 @@ class MilvusSchemaBuilder:
             schema = self.create_schema_from_metadata(metadata)
 
             # Create index params
-            index_params = self.create_index_params_from_metadata(metadata, use_flat_index)
+            index_params = self.create_index_params_from_metadata(
+                metadata, use_flat_index
+            )
 
             # Create collection
             self.client.create_collection(
@@ -257,7 +265,10 @@ class MilvusSchemaBuilder:
         return False
 
     def get_index_info_from_metadata(
-        self, collection_name: str, metadata: dict[str, Any], use_flat_index: bool = True
+        self,
+        collection_name: str,
+        metadata: dict[str, Any],
+        use_flat_index: bool = True,
     ) -> list[dict[str, Any]]:
         """Get index information from metadata for return values.
 
@@ -290,9 +301,13 @@ class MilvusSchemaBuilder:
                 else:
                     # Determine metric type based on vector type
                     metric_type = "HAMMING" if field_type == "BinaryVector" else "L2"
-                    
+
                     # Determine index type - FLAT only applies to dense vector fields
-                    if use_flat_index and field_type in ["FloatVector", "Float16Vector", "BFloat16Vector"]:
+                    if use_flat_index and field_type in [
+                        "FloatVector",
+                        "Float16Vector",
+                        "BFloat16Vector",
+                    ]:
                         index_type = "FLAT"
                     else:
                         index_type = "AUTOINDEX"
