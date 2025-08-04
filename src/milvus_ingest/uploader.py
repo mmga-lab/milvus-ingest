@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
 from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
@@ -72,6 +73,7 @@ class S3Uploader:
         secret_access_key: str | None = None,
         region_name: str = "us-east-1",
         verify_ssl: bool = True,
+        use_aws_cli: bool = True,
     ):
         """Initialize S3 client.
 
@@ -81,14 +83,26 @@ class S3Uploader:
             secret_access_key: AWS secret access key (can also be set via AWS_SECRET_ACCESS_KEY env var)
             region_name: AWS region name (default: us-east-1)
             verify_ssl: Whether to verify SSL certificates (default: True)
+            use_aws_cli: Use AWS CLI subprocess instead of boto3 for uploads (more reliable, default: True)
         """
         self.logger = get_logger(__name__)
 
+        # Store configuration
+        self.use_aws_cli = use_aws_cli
+        self.access_key_id = access_key_id
+        self.secret_access_key = secret_access_key
+        self.region_name = region_name
+        self.verify_ssl = verify_ssl
+
         # Get credentials from environment if not provided
-        if not access_key_id:
-            access_key_id = os.environ.get("AWS_ACCESS_KEY_ID")
-        if not secret_access_key:
-            secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if not self.access_key_id:
+            self.access_key_id = os.environ.get("AWS_ACCESS_KEY_ID")
+        if not self.secret_access_key:
+            self.secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+
+        # Check AWS CLI availability if requested
+        if self.use_aws_cli:
+            self._check_aws_cli_available()
 
         # Configure retry behavior for rate limiting
         retry_config = Config(
@@ -114,10 +128,10 @@ class S3Uploader:
             self.s3_client = boto3.client(
                 "s3",
                 endpoint_url=endpoint_url,
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-                region_name=region_name,
-                verify=verify_ssl,
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+                region_name=self.region_name,
+                verify=self.verify_ssl,
                 config=retry_config,
             )
             self.endpoint_url = endpoint_url
@@ -125,7 +139,8 @@ class S3Uploader:
                 "S3 client initialized",
                 extra={
                     "endpoint": endpoint_url or "AWS S3",
-                    "region": region_name,
+                    "region": self.region_name,
+                    "upload_method": "AWS CLI" if self.use_aws_cli else "boto3",
                 },
             )
         except Exception as e:
@@ -219,13 +234,15 @@ class S3Uploader:
         # Upload files (simplified without progress bar)
         if show_progress:
             print(f"☁️ Uploading {len(files_to_upload)} files to S3...")
-        
+
         for i, file_path in enumerate(files_to_upload, 1):
             # Show progress periodically
             if show_progress and i % 5 == 0:
                 progress_pct = 100.0 * i / len(files_to_upload)
-                print(f"📊 Upload progress: {i}/{len(files_to_upload)} files ({progress_pct:.1f}%)")
-            
+                print(
+                    f"📊 Upload progress: {i}/{len(files_to_upload)} files ({progress_pct:.1f}%)"
+                )
+
             # Calculate S3 key
             relative_path = file_path.relative_to(local_path)
             relative_path_str = str(relative_path).replace(
@@ -349,7 +366,32 @@ class S3Uploader:
         key: str,
         progress_callback: Callable[[int], None] | None = None,
     ) -> dict[str, Any]:
-        """Upload a single file to S3 using multipart upload for large files with integrity validation.
+        """Upload a single file to S3 with integrity validation.
+
+        Args:
+            file_path: Local file path to upload
+            bucket: S3 bucket name
+            key: S3 object key
+            progress_callback: Optional callback function for progress updates
+
+        Returns:
+            Dictionary with upload results including integrity validation
+        """
+        if self.use_aws_cli:
+            return self._upload_file_with_cli(file_path, bucket, key, progress_callback)
+        else:
+            return self._upload_file_with_boto3(
+                file_path, bucket, key, progress_callback
+            )
+
+    def _upload_file_with_boto3(
+        self,
+        file_path: Path,
+        bucket: str,
+        key: str,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> dict[str, Any]:
+        """Upload a single file to S3 using boto3 with multipart upload for large files.
 
         Args:
             file_path: Local file path to upload
@@ -456,6 +498,157 @@ class S3Uploader:
 
         return result
 
+    def _upload_file_with_cli(
+        self,
+        file_path: Path,
+        bucket: str,
+        key: str,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> dict[str, Any]:
+        """Upload a single file to S3 using AWS CLI subprocess.
+
+        Args:
+            file_path: Local file path to upload
+            bucket: S3 bucket name
+            key: S3 object key
+            progress_callback: Optional callback function for progress updates
+
+        Returns:
+            Dictionary with upload results including integrity validation
+        """
+        result = {
+            "success": False,
+            "file_path": str(file_path),
+            "s3_key": key,
+            "local_size": 0,
+            "remote_size": 0,
+            "local_etag": None,
+            "remote_etag": None,
+            "integrity_valid": False,
+        }
+
+        try:
+            # Get local file information
+            file_size = file_path.stat().st_size
+            result["local_size"] = file_size
+
+            # Build AWS CLI command
+            s3_uri = f"s3://{bucket}/{key}"
+            cmd = ["aws", "s3", "cp", str(file_path), s3_uri]
+
+            # Add endpoint URL if specified (for MinIO)
+            if self.endpoint_url:
+                cmd.extend(["--endpoint-url", self.endpoint_url])
+
+            # Add SSL verification settings
+            if not self.verify_ssl:
+                cmd.append("--no-verify-ssl")
+
+            # AWS CLI v2 doesn't use these timeout options
+            # Timeout behavior is controlled by AWS config instead
+
+            self.logger.info(f"Starting AWS CLI upload: {file_path.name} -> {s3_uri}")
+
+            # Execute AWS CLI command
+            env = os.environ.copy()
+
+            # Ensure credentials are in environment
+            if self.access_key_id:
+                env["AWS_ACCESS_KEY_ID"] = self.access_key_id
+            if self.secret_access_key:
+                env["AWS_SECRET_ACCESS_KEY"] = self.secret_access_key
+            if self.region_name:
+                env["AWS_DEFAULT_REGION"] = self.region_name
+
+            # Run the command with progress monitoring
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+
+            # Monitor progress if callback is provided
+            if progress_callback:
+                self._monitor_cli_progress(process, file_size, progress_callback)
+
+            # Wait for completion
+            _, stderr = process.communicate()
+
+            if process.returncode != 0:
+                error_msg = stderr.strip() if stderr else "Unknown error"
+                self.logger.error(f"AWS CLI upload failed: {error_msg}")
+                raise RuntimeError(f"AWS CLI upload failed: {error_msg}")
+
+            self.logger.info(f"AWS CLI upload completed: {file_path.name}")
+
+            # Verify upload integrity using boto3 (same as before)
+            # Calculate local ETag for verification
+            if file_size < 1024 * 1024 * 1024:  # < 1GB
+                result["local_etag"] = self._calculate_file_md5(file_path)
+            else:
+                # For large files, we'll skip ETag calculation since AWS CLI
+                # uses its own multipart strategy that we can't predict
+                result["local_etag"] = None
+
+            integrity_check = self._verify_upload_integrity(bucket, key, result)
+            result.update(integrity_check)
+
+            if result["integrity_valid"]:
+                self.logger.debug(
+                    f"✅ AWS CLI upload verified: {file_path} -> {s3_uri}"
+                )
+                result["success"] = True
+            else:
+                self.logger.error(
+                    f"❌ AWS CLI upload integrity check failed: {file_path}"
+                )
+                # Clean up failed upload
+                try:
+                    self.s3_client.delete_object(Bucket=bucket, Key=key)
+                    self.logger.info(f"Cleaned up failed upload: {s3_uri}")
+                except Exception as cleanup_error:
+                    self.logger.warning(
+                        f"Failed to clean up failed upload: {cleanup_error}"
+                    )
+                raise ValueError(f"Upload integrity validation failed for {file_path}")
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise RuntimeError(f"AWS CLI upload timed out for {file_path}") from None
+        except Exception as e:
+            self.logger.error(f"Failed to upload {file_path} with AWS CLI: {e}")
+            raise
+
+        return result
+
+    def _monitor_cli_progress(
+        self, process: subprocess.Popen, file_size: int, callback: Callable[[int], None]
+    ) -> None:
+        """Monitor AWS CLI progress and call the progress callback."""
+        # AWS CLI doesn't provide detailed progress output by default in the stderr/stdout
+        # This implementation provides basic progress reporting based on process status
+        import time
+
+        callback(0)  # Start
+
+        # Monitor process status and provide basic progress updates
+        # Since we can't get actual transfer progress from AWS CLI easily,
+        # we'll simulate progress based on time elapsed for large files
+        start_time = time.time()
+        max_wait_time = max(60, file_size / (1024 * 1024))  # Estimate 1MB/sec minimum
+
+        while process.poll() is None:
+            elapsed = time.time() - start_time
+            # Estimate progress based on elapsed time (very rough)
+            estimated_progress = min(95, int((elapsed / max_wait_time) * 100))
+            callback(estimated_progress)
+            time.sleep(5)  # Update every 5 seconds
+
+        # Process completed
+        callback(100)
+
     def _calculate_file_md5(self, file_path: Path) -> str:
         """Calculate MD5 hash of a file."""
         import hashlib
@@ -503,10 +696,11 @@ class S3Uploader:
             size_match = result["remote_size"] == upload_info["local_size"]
 
             # Check ETag match (more complex for multipart uploads)
-            etag_match = False
+            etag_match = True  # Default to True if we can't verify ETag
             local_etag = upload_info.get("local_etag", "")
             remote_etag = result["remote_etag"]
 
+            # Only verify ETag if we have a local ETag to compare against
             if local_etag and remote_etag:
                 # Handle multipart ETags (contain dashes)
                 if "-" in remote_etag:
@@ -516,21 +710,207 @@ class S3Uploader:
                     # Single part upload - simple MD5 comparison
                     etag_match = local_etag.split("-")[0] == remote_etag
 
+                if not etag_match:
+                    self.logger.warning(
+                        f"ETag mismatch - Local: {local_etag}, Remote: {remote_etag}"
+                    )
+            elif not local_etag:
+                # For AWS CLI uploads of large files, we skip ETag verification
+                # and rely on size match + AWS CLI's internal integrity checks
+                self.logger.debug(
+                    "Skipping ETag verification (not available for large AWS CLI uploads)"
+                )
+
             result["integrity_valid"] = size_match and etag_match
 
             if not size_match:
                 self.logger.warning(
                     f"Size mismatch - Local: {upload_info['local_size']}, Remote: {result['remote_size']}"
                 )
-            if not etag_match:
-                self.logger.warning(
-                    f"ETag mismatch - Local: {local_etag}, Remote: {remote_etag}"
-                )
 
         except Exception as e:
             self.logger.error(f"Failed to verify upload integrity: {e}")
 
         return result
+
+    def _check_aws_cli_available(self) -> None:
+        """Check if AWS CLI is available and install if missing."""
+        try:
+            # Check if aws command is available
+            result = subprocess.run(
+                ["aws", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"AWS CLI not found or not working: {result.stderr}")
+
+            self.logger.info(f"AWS CLI available: {result.stdout.strip()}")
+
+            # Set up environment variables for AWS CLI if credentials are provided
+            if self.access_key_id:
+                os.environ["AWS_ACCESS_KEY_ID"] = self.access_key_id
+            if self.secret_access_key:
+                os.environ["AWS_SECRET_ACCESS_KEY"] = self.secret_access_key
+            if self.region_name:
+                os.environ["AWS_DEFAULT_REGION"] = self.region_name
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("AWS CLI check timed out") from None
+        except FileNotFoundError:
+            # AWS CLI not found, attempt to install it
+            self.logger.warning(
+                "AWS CLI not found. Attempting to install automatically..."
+            )
+            if self._install_aws_cli():
+                # After successful installation, verify it works
+                self._check_aws_cli_available()
+            else:
+                raise RuntimeError(
+                    "AWS CLI not found and automatic installation failed. "
+                    "Please install manually with: pip install awscli --upgrade --user"
+                ) from None
+        except Exception as e:
+            raise RuntimeError(f"Failed to verify AWS CLI: {e}") from e
+
+    def _install_aws_cli(self) -> bool:
+        """Attempt to install AWS CLI automatically."""
+        try:
+            from .rich_display import display_info
+
+            display_info("🔧 Installing AWS CLI...")
+            self.logger.info("Attempting to install AWS CLI via pip...")
+
+            # Try to install AWS CLI using pip with --user flag
+            result = subprocess.run(
+                ["pip", "install", "awscli", "--upgrade", "--user"],
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes timeout for installation
+            )
+
+            if result.returncode == 0:
+                self.logger.info("✅ AWS CLI installed successfully")
+                display_info("✅ AWS CLI installed successfully")
+
+                # Check if we need to add to PATH
+                self._check_and_update_path()
+                return True
+            else:
+                self.logger.error(f"❌ Failed to install AWS CLI: {result.stderr}")
+
+                # Try alternative installation methods
+                return self._try_alternative_install()
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("AWS CLI installation timed out")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to install AWS CLI: {e}")
+            return False
+
+    def _try_alternative_install(self) -> bool:
+        """Try alternative AWS CLI installation methods."""
+        try:
+            from .rich_display import display_info
+
+            # Try pip3 if pip failed
+            display_info("🔧 Trying alternative installation with pip3...")
+            self.logger.info("Trying pip3 installation...")
+
+            result = subprocess.run(
+                ["pip3", "install", "awscli", "--upgrade", "--user"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+
+            if result.returncode == 0:
+                self.logger.info("✅ AWS CLI installed successfully with pip3")
+                display_info("✅ AWS CLI installed successfully with pip3")
+                self._check_and_update_path()
+                return True
+            else:
+                # Try python -m pip
+                display_info("🔧 Trying installation with python -m pip...")
+                self.logger.info("Trying python -m pip installation...")
+
+                result = subprocess.run(
+                    ["python", "-m", "pip", "install", "awscli", "--upgrade", "--user"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+
+                if result.returncode == 0:
+                    self.logger.info(
+                        "✅ AWS CLI installed successfully with python -m pip"
+                    )
+                    display_info("✅ AWS CLI installed successfully")
+                    self._check_and_update_path()
+                    return True
+
+            self.logger.error("All installation attempts failed")
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Alternative installation failed: {e}")
+            return False
+
+    def _check_and_update_path(self) -> None:
+        """Check if AWS CLI is in PATH and provide guidance if not."""
+        import platform
+        from pathlib import Path
+
+        # Try to find aws command in common user directories
+        home = Path.home()
+        possible_paths = []
+
+        if platform.system() == "Windows":
+            possible_paths = [
+                home / "AppData" / "Roaming" / "Python" / "Scripts",
+                home / ".local" / "bin",
+            ]
+        else:  # Unix-like (Linux, macOS)
+            possible_paths = [
+                home / ".local" / "bin",
+                home / "Library" / "Python" / "3.9" / "bin",  # macOS specific
+                home / "Library" / "Python" / "3.10" / "bin",
+                home / "Library" / "Python" / "3.11" / "bin",
+                home / "Library" / "Python" / "3.12" / "bin",
+            ]
+
+        # Check if aws exists in any of these paths
+        aws_found = False
+        aws_path = None
+
+        for path in possible_paths:
+            if path.exists():
+                aws_exe = path / (
+                    "aws.exe" if platform.system() == "Windows" else "aws"
+                )
+                if aws_exe.exists():
+                    aws_found = True
+                    aws_path = path
+                    break
+
+        if aws_found and aws_path:
+            # Check if this path is already in PATH
+            current_path = os.environ.get("PATH", "")
+            if str(aws_path) not in current_path:
+                # Add to current session PATH
+                os.environ["PATH"] = f"{aws_path}{os.pathsep}{current_path}"
+
+                # Provide user guidance
+                from .rich_display import display_info
+
+                display_info(
+                    f"⚠️  AWS CLI installed to {aws_path}\n"
+                    f"   Add this to your PATH for future sessions:\n"
+                    f'   export PATH="{aws_path}:$PATH"'
+                )
+                self.logger.info(f"Added {aws_path} to current session PATH")
 
     def test_connection(self) -> bool:
         """Test connection to S3/MinIO."""
