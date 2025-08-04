@@ -41,14 +41,6 @@ import yaml
 from faker import Faker
 from ml_dtypes import bfloat16
 from pydantic import ValidationError
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
 
 from .logging_config import (
     get_logger,
@@ -165,84 +157,46 @@ def generate_mock_data_batches(
         pk_field=pk_field["name"] if pk_field else None,
     )
 
-    # Show progress bar when enabled
+    # Generate data in batches
     if show_progress:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeRemainingColumn(),
-        ) as progress:
-            task = progress.add_task("Generating mock data...", total=rows)
+        print(f"🎯 Generating {rows:,} rows of mock data...")
+    
+    for batch_idx in range(total_batches):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, rows)
+        
+        if show_progress and batch_idx % 10 == 0:  # Print progress every 10 batches
+            print(f"📊 Progress: {end_idx:,}/{rows:,} rows ({100.0 * end_idx / rows:.1f}%)")
 
-            for batch_idx in range(total_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, rows)
+        rows_data: list[dict[str, Any]] = []
+        for idx in range(start_idx, end_idx):
+            row: dict[str, Any] = {}
+            for f in fields:
+                name = f["name"]
+                f_type = f["type"].upper()
+                # Skip auto_id fields
+                if f.get("auto_id"):
+                    continue
+                # Primary key handling (monotonic unique)
+                if pk_field and name == pk_field["name"]:
+                    row[name] = _gen_pk_value(f_type, base_ts, idx)
+                    continue
+                # Nullable handling
+                if f.get("nullable") and random.random() < NULL_PROB:
+                    row[name] = None
+                    continue
+                # Generate value by type
+                row[name] = _gen_value_by_field(f)
+            rows_data.append(row)
 
-                rows_data: list[dict[str, Any]] = []
-                for idx in range(start_idx, end_idx):
-                    row: dict[str, Any] = {}
-                    for f in fields:
-                        name = f["name"]
-                        f_type = f["type"].upper()
-                        # Skip auto_id fields
-                        if f.get("auto_id"):
-                            continue
-                        # Primary key handling (monotonic unique)
-                        if pk_field and name == pk_field["name"]:
-                            row[name] = _gen_pk_value(f_type, base_ts, idx)
-                            continue
-                        # Nullable handling
-                        if f.get("nullable") and random.random() < NULL_PROB:
-                            row[name] = None
-                            continue
-                        # Generate value by type
-                        row[name] = _gen_value_by_field(f)
-                    rows_data.append(row)
-                    progress.update(task, advance=1)
-
-                logger.debug(
-                    "Batch generated",
-                    batch_idx=batch_idx + 1,
-                    batch_size=len(rows_data),
-                    start_idx=start_idx,
-                    end_idx=end_idx,
-                )
-                yield pd.DataFrame(rows_data)
-    else:
-        # Generate without progress bar when disabled
-        for batch_idx in range(total_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, rows)
-
-            batch_rows_data: list[dict[str, Any]] = []
-            for idx in range(start_idx, end_idx):
-                batch_row: dict[str, Any] = {}
-                for f in fields:
-                    name = f["name"]
-                    f_type = f["type"].upper()
-                    # Skip auto_id fields
-                    if f.get("auto_id"):
-                        continue
-                    # Primary key handling (monotonic unique)
-                    if pk_field and name == pk_field["name"]:
-                        batch_row[name] = _gen_pk_value(f_type, base_ts, idx)
-                        continue
-                    # Nullable handling
-                    if f.get("nullable") and random.random() < NULL_PROB:
-                        batch_row[name] = None
-                        continue
-                    # Generate value by type
-                    batch_row[name] = _gen_value_by_field(f)
-                batch_rows_data.append(batch_row)
-
-            logger.debug(
-                "Batch generated (no progress)",
-                batch_idx=batch_idx + 1,
-                batch_size=len(batch_rows_data),
-            )
-            yield pd.DataFrame(batch_rows_data)
+        logger.debug(
+            "Batch generated",
+            batch_idx=batch_idx + 1,
+            batch_size=len(rows_data),
+            start_idx=start_idx,
+            end_idx=end_idx,
+        )
+        yield pd.DataFrame(rows_data)
 
     # Log performance metrics
     total_time = time.time() - start_time

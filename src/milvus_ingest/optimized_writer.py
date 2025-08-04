@@ -322,7 +322,6 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
         format = file_info["format"]
         seed = file_info["seed"]
         num_partitions = file_info.get("num_partitions")
-        num_shards = file_info.get("num_shards")
 
         # Set process-specific seed to ensure different random data per process
         if seed:
@@ -353,8 +352,7 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
             # Identify special fields
             if field.get("is_partition_key", False):
                 partition_key_field = field
-            if field.get("is_primary", False):
-                primary_key_field = field
+            # Note: primary_key_field is determined but not used in single file generation
 
             if "Vector" in field["type"]:
                 vector_fields.append(field)
@@ -2984,7 +2982,6 @@ def _generate_with_chunk_and_merge(
     4. Cleans up temporary files
     """
     from .file_merger import FileMerger
-    import tempfile
     import shutil
 
     start_time = time.time()

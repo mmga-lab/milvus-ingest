@@ -6,14 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
-
-from .exceptions import MilvusIngestError
 
 
 class LightweightValidator:

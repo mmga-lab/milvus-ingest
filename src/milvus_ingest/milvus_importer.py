@@ -10,13 +10,6 @@ from typing import Any
 from pymilvus import MilvusClient
 from pymilvus.bulk_writer import bulk_import, get_import_progress, list_import_jobs
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
 
 from .logging_config import get_logger
 from .milvus_schema_builder import MilvusSchemaBuilder
@@ -262,134 +255,61 @@ class MilvusBulkImporter:
         """
         start_time = time.time()
 
-        if show_progress:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                transient=True,
-                console=self.console,
-            ) as progress:
-                task = progress.add_task(
-                    "Waiting for import completion...", total=timeout
+        # Wait for import completion (simplified without progress bar)
+        print(f"⏳ Waiting for import completion (job: {job_id}, timeout: {timeout}s)...")
+        last_log_time = 0.0
+
+        while time.time() - start_time < timeout:
+            resp = get_import_progress(
+                url=self.uri,
+                job_id=job_id,
+            )
+            job_info = resp.json()["data"]
+            state = job_info.get("state", "unknown")
+            progress_percent = job_info.get("progress", 0)
+            imported_rows = job_info.get("importedRows", 0)
+            total_rows = job_info.get("totalRows", 0)
+            file_size = job_info.get("fileSize", 0)
+
+            # Log detailed progress information every 10 seconds
+            elapsed = time.time() - start_time
+            if elapsed - last_log_time >= 10:
+                print(f"📊 Import progress: {progress_percent}% ({imported_rows:,}/{total_rows:,} rows, {elapsed:.1f}s)")
+                self.logger.info(f"Import progress update for job {job_id}:")
+                self.logger.info(f"  State: {state}")
+                self.logger.info(f"  Progress: {progress_percent}%")
+                self.logger.info(
+                    f"  Imported rows: {imported_rows:,} / {total_rows:,}"
                 )
+                self.logger.info(f"  File size processed: {file_size:,} bytes")
+                self.logger.info(f"  Elapsed time: {elapsed:.1f}s")
+                last_log_time = elapsed
 
-                while time.time() - start_time < timeout:
-                    # Check job status
-                    resp = get_import_progress(
-                        url=self.uri,
-                        job_id=job_id,
-                    )
-                    job_info = resp.json()["data"]
-                    state = job_info.get("state", "unknown")
-                    progress_percent = job_info.get("progress", 0)
-                    imported_rows = job_info.get("importedRows", 0)
-                    total_rows = job_info.get("totalRows", 0)
-                    file_size = job_info.get("fileSize", 0)
-
-                    # Log detailed progress information
-                    elapsed = time.time() - start_time
-                    if int(elapsed) % 10 < 2:  # Log every 10 seconds
-                        # Stop the progress temporarily and print logs
-                        progress.stop()
-                        self.logger.info(f"Import progress update for job {job_id}:")
-                        self.logger.info(f"  State: {state}")
-                        self.logger.info(f"  Progress: {progress_percent}%")
-                        self.logger.info(
-                            f"  Imported rows: {imported_rows:,} / {total_rows:,}"
-                        )
-                        self.logger.info(f"  File size processed: {file_size:,} bytes")
-                        self.logger.info(f"  Elapsed time: {elapsed:.1f}s")
-                        # Resume progress bar
-                        progress.start()
-
-                    if state == "ImportCompleted" or state == "Completed":
-                        progress.update(task, completed=timeout)
-                        # Stop progress before final logs
-                        progress.stop()
-                        self.logger.info("🎉 Bulk import completed successfully!")
-                        self.logger.info(f"Job ID: {job_id}")
-                        self.logger.info(f"Total rows imported: {imported_rows:,}")
-                        self.logger.info(f"Total file size: {file_size:,} bytes")
-                        self.logger.info(f"Total time: {elapsed:.2f}s")
-                        if imported_rows > 0 and elapsed > 0:
-                            rate = imported_rows / elapsed
-                            self.logger.info(f"Import rate: {rate:.0f} rows/second")
-                        return True
-                    elif state == "ImportFailed" or state == "Failed":
-                        progress.update(task, completed=timeout)
-                        # Stop progress before error logs
-                        progress.stop()
-                        reason = job_info.get("reason", "Unknown error")
-                        self.logger.error("❌ Bulk import failed!")
-                        self.logger.error(f"Job ID: {job_id}")
-                        self.logger.error(f"Failure reason: {reason}")
-                        self.logger.error(f"State: {state}")
-                        self.logger.error(f"Progress when failed: {progress_percent}%")
-                        self.logger.error(
-                            f"Rows imported before failure: {imported_rows:,}"
-                        )
-                        return False
-
-                    # Update progress
-                    progress.update(task, completed=min(elapsed, timeout))
-
-                    time.sleep(2)
-
-        else:
-            # Wait without progress bar
-            self.logger.info(f"Monitoring import job {job_id} (no progress bar)")
-            last_log_time = 0.0
-
-            while time.time() - start_time < timeout:
-                resp = get_import_progress(
-                    url=self.uri,
-                    job_id=job_id,
+            if state == "ImportCompleted" or state == "Completed":
+                print("✅ Bulk import completed successfully!")
+                self.logger.info("🎉 Bulk import completed successfully!")
+                self.logger.info(f"Job ID: {job_id}")
+                self.logger.info(f"Total rows imported: {imported_rows:,}")
+                self.logger.info(f"Total file size: {file_size:,} bytes")
+                self.logger.info(f"Total time: {elapsed:.2f}s")
+                if imported_rows > 0 and elapsed > 0:
+                    rate = imported_rows / elapsed
+                    self.logger.info(f"Import rate: {rate:.0f} rows/second")
+                return True
+            elif state == "ImportFailed" or state == "Failed":
+                reason = job_info.get("reason", "Unknown error")
+                print(f"❌ Bulk import failed: {reason}")
+                self.logger.error("❌ Bulk import failed!")
+                self.logger.error(f"Job ID: {job_id}")
+                self.logger.error(f"Failure reason: {reason}")
+                self.logger.error(f"State: {state}")
+                self.logger.error(f"Progress when failed: {progress_percent}%")
+                self.logger.error(
+                    f"Rows imported before failure: {imported_rows:,}"
                 )
-                job_info = resp.json()["data"]
-                state = job_info.get("state", "unknown")
-                progress_percent = job_info.get("progress", 0)
-                imported_rows = job_info.get("importedRows", 0)
-                total_rows = job_info.get("totalRows", 0)
-                file_size = job_info.get("fileSize", 0)
+                return False
 
-                # Log detailed progress information every 10 seconds
-                elapsed = time.time() - start_time
-                if elapsed - last_log_time >= 10:
-                    self.logger.info(f"Import progress update for job {job_id}:")
-                    self.logger.info(f"  State: {state}")
-                    self.logger.info(f"  Progress: {progress_percent}%")
-                    self.logger.info(
-                        f"  Imported rows: {imported_rows:,} / {total_rows:,}"
-                    )
-                    self.logger.info(f"  File size processed: {file_size:,} bytes")
-                    self.logger.info(f"  Elapsed time: {elapsed:.1f}s")
-                    last_log_time = elapsed
-
-                if state == "ImportCompleted" or state == "Completed":
-                    self.logger.info("🎉 Bulk import completed successfully!")
-                    self.logger.info(f"Job ID: {job_id}")
-                    self.logger.info(f"Total rows imported: {imported_rows:,}")
-                    self.logger.info(f"Total file size: {file_size:,} bytes")
-                    self.logger.info(f"Total time: {elapsed:.2f}s")
-                    if imported_rows > 0 and elapsed > 0:
-                        rate = imported_rows / elapsed
-                        self.logger.info(f"Import rate: {rate:.0f} rows/second")
-                    return True
-                elif state == "ImportFailed" or state == "Failed":
-                    reason = job_info.get("reason", "Unknown error")
-                    self.logger.error("❌ Bulk import failed!")
-                    self.logger.error(f"Job ID: {job_id}")
-                    self.logger.error(f"Failure reason: {reason}")
-                    self.logger.error(f"State: {state}")
-                    self.logger.error(f"Progress when failed: {progress_percent}%")
-                    self.logger.error(
-                        f"Rows imported before failure: {imported_rows:,}"
-                    )
-                    return False
-
-                time.sleep(2)
+            time.sleep(2)
 
         # Timeout reached
         elapsed = time.time() - start_time
