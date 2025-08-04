@@ -67,12 +67,33 @@ class MinimalValidator:
             file_format = generation_info.get("format", "parquet")
             results["summary"]["format"] = file_format
 
+            # Handle both old format (list of strings) and new format (list of dicts)
+            if expected_files and isinstance(expected_files[0], str):
+                # Old format: convert to new format for compatibility
+                expected_files = [{"file_name": name, "rows": None} for name in expected_files]
+            elif expected_files and isinstance(expected_files[0], dict):
+                # New format: use as-is
+                pass
+            else:
+                results["errors"].append("Invalid data_files format in meta.json")
+                return results
+
             # 3. For each file, do minimal validation
             total_rows = 0
             total_size = 0
             valid_files = 0
 
-            for file_name in expected_files:
+            for file_info in expected_files:
+                # Support both old and new format
+                if isinstance(file_info, str):
+                    file_name = file_info
+                    expected_file_rows = None
+                    expected_file_size = None
+                else:
+                    file_name = file_info.get("file_name")
+                    expected_file_rows = file_info.get("rows")
+                    expected_file_size = file_info.get("file_size_bytes")
+
                 file_path = self.output_dir / file_name
 
                 if not file_path.exists():
@@ -84,6 +105,15 @@ class MinimalValidator:
                     # Get file size
                     file_size = file_path.stat().st_size
                     total_size += file_size
+
+                    # Validate file size if expected size is available
+                    if expected_file_size is not None:
+                        if file_size != expected_file_size:
+                            results["valid"] = False
+                            results["errors"].append(
+                                f"File size mismatch in {file_name}: expected {expected_file_size} bytes, got {file_size} bytes"
+                            )
+                            continue
 
                     # Try to get row count based on format
                     if file_format.lower() == "parquet":
@@ -131,14 +161,15 @@ class MinimalValidator:
             raise Exception(f"Cannot read parquet metadata: {e}")
 
     def _get_json_row_count(self, file_path: Path) -> int:
-        """Get row count from JSON file."""
+        """Get row count from JSON Array file (Milvus bulk import format)."""
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
                     return len(data)
                 else:
-                    return 1  # Single object
+                    # Single JSON object (valid but uncommon for bulk import)
+                    return 1
         except Exception as e:
             raise Exception(f"Cannot read JSON file: {e}")
 
