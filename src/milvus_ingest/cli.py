@@ -1269,28 +1269,47 @@ def upload(
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="white")
 
-            table.add_row("Total Files", f"{validation['total_files']}")
-            table.add_row("Validated Files", f"{validation['validated_files']}")
-            table.add_row(
-                "Failed Validations", f"{len(validation['failed_validations'])}"
-            )
+            # Handle different validation result formats
+            summary = validation.get("summary", {})
+            if "total_files" in validation:
+                # Old format (backwards compatibility)
+                table.add_row("Total Files", f"{validation['total_files']}")
+                table.add_row("Validated Files", f"{validation.get('validated_files', 0)}")
+                table.add_row(
+                    "Failed Validations", f"{len(validation.get('failed_validations', []))}"
+                )
+            else:
+                # New S3MinimalValidator format
+                table.add_row("Total Files", f"{summary.get('total_files', 0)}")
+                table.add_row("Total Rows", f"{summary.get('total_rows', 0):,}")
+                table.add_row("Total Size", f"{summary.get('total_size', 0) / (1024 * 1024):.2f} MB")
+                table.add_row("Format", f"{summary.get('format', 'unknown')}")
+                table.add_row("Errors", f"{len(validation.get('errors', []))}")
 
             console.print(table)
 
             # Show failed validations if any
-            if validation["failed_validations"]:
+            failed_validations = validation.get("failed_validations", [])
+            errors = validation.get("errors", [])
+            
+            if failed_validations:
                 console.print("\n[bold red]Failed File Validations:[/bold red]")
-                for failure in validation["failed_validations"]:
+                for failure in failed_validations:
                     console.print(
                         f"  • [red]{failure['file']}[/red]: {failure['s3_key']}"
                     )
                     for error in failure.get("errors", []):
                         console.print(f"    - {error}")
+            elif errors:
+                console.print("\n[bold red]Validation Errors:[/bold red]")
+                for error in errors:
+                    console.print(f"  • [red]{error}[/red]")
 
             # Show file details in verbose mode (optional)
-            if validation["file_details"] and len(validation["file_details"]) <= 5:
+            file_details = validation.get("file_details", [])
+            if file_details and len(file_details) <= 5:
                 console.print("\n[dim]File Details:[/dim]")
-                for detail in validation["file_details"]:
+                for detail in file_details:
                     status = "✅" if detail["valid"] else "❌"
                     size_mb = detail["file_size_bytes"] / (1024 * 1024)
                     console.print(

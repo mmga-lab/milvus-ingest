@@ -907,6 +907,7 @@ def _generate_files_parallel(
     completed_rows = 0
     completed_files_lock = threading.Lock()
     all_files_created = []
+    all_files_info = []  # Store detailed file information (path, rows, etc.)
     all_optimization_info = []
     total_generation_time = 0.0
     total_write_time = 0.0
@@ -927,7 +928,18 @@ def _generate_files_parallel(
                 completed_rows += result.get("rows", 0)
                 total_generation_time += result.get("generation_time", 0)
                 total_write_time += result.get("write_time", 0)
-                all_files_created.append(result.get("file_path", ""))
+                file_path = result.get("file_path", "")
+                all_files_created.append(file_path)
+                
+                # Store detailed file info
+                file_size = Path(file_path).stat().st_size if Path(file_path).exists() else 0
+                all_files_info.append({
+                    "file_name": Path(file_path).name,
+                    "file_path": file_path,
+                    "rows": result.get("rows", 0),
+                    "file_index": result.get("file_index", -1),
+                    "file_size_bytes": file_size,
+                })
 
                 # Collect optimization info if available
                 if result.get("optimization_info"):
@@ -1008,7 +1020,7 @@ def _generate_files_parallel(
             "total_rows": rows,
             "format": format,
             "seed": seed,
-            "data_files": [Path(f).name for f in all_files_created],
+            "data_files": all_files_info,
             "file_count": len(all_files_created),
             "max_rows_per_file": effective_max_rows_per_file,
             "max_file_size_mb": default_file_size_mb,
@@ -2289,6 +2301,7 @@ def generate_data_optimized(
     file_index = 0
     pk_offset = 0
     all_files_created = []
+    all_files_info = []  # Store detailed file information (path, rows, etc.)
     total_generation_time = 0.0
     total_write_time = 0.0
     all_optimization_info = []  # Collect optimization info from all files
@@ -2786,6 +2799,16 @@ def generate_data_optimized(
         total_write_time += batch_write_time
 
         all_files_created.append(str(output_file))
+        
+        # Store detailed file info
+        file_size = output_file.stat().st_size if output_file.exists() else 0
+        all_files_info.append({
+            "file_name": Path(output_file).name,
+            "file_path": str(output_file),
+            "rows": current_batch_rows,
+            "file_index": file_index,
+            "file_size_bytes": file_size,
+        })
 
         # Log progress - use debug level when progress callback is provided to avoid mixing with progress bar
         completion_msg = (
@@ -2822,7 +2845,7 @@ def generate_data_optimized(
             "total_rows": rows,
             "format": format,
             "seed": seed,
-            "data_files": [Path(f).name for f in all_files_created],
+            "data_files": all_files_info,
             "file_count": len(all_files_created),
             "max_rows_per_file": rows_per_file,
             "max_file_size_mb": target_file_size_mb,

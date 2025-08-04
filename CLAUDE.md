@@ -71,6 +71,9 @@ pdm publish       # Publish to PyPI (requires PDM_PUBLISH_TOKEN)
 ```
 
 ### CLI Usage for Testing
+
+data path parent is ./data/
+
 ```bash
 # Install in development mode first
 pdm install
@@ -168,11 +171,13 @@ milvus-ingest to-milvus verify ./output --level scalar --uri http://remote:19530
 
 ### Validation System
 
-The system includes an automated validation step after data generation to ensure file integrity:
+The system includes comprehensive validation at multiple stages to ensure data integrity:
 
-#### Minimal Validation (Default)
+#### Local File Validation (Default)
+Automatically runs after data generation to ensure file integrity:
 - **File Readability**: Verifies files can be opened and schema can be read
 - **Row Count Verification**: Confirms actual row count matches expected count from meta.json
+- **File Size Validation**: Validates exact file size matches recorded size (byte-level precision)
 - **Performance**: Very fast, only reads file metadata (not actual data)
 - **Coverage**: Validates all generated files for basic integrity
 
@@ -182,11 +187,21 @@ milvus-ingest generate --builtin quickstart --total-rows 10000
 # Output includes: "✅ File validation passed: 1 files, 10,000 rows"
 ```
 
-The minimal validator only performs two essential checks:
+#### S3 Upload Validation
+Comprehensive validation after S3/MinIO upload to ensure upload integrity:
+- **File Existence**: Confirms all files exist in S3/MinIO
+- **Row Count Verification**: Uses optimized streaming to verify row counts without full download
+- **File Size Validation**: Validates uploaded file sizes match local file sizes exactly
+- **Format-Optimized Reading**: 
+  - **Parquet**: Reads only footer metadata (8-64KB) using S3 Range requests
+  - **JSON Array**: Streaming parser for large files, direct parsing for small files (<10MB)
+
+The validation system performs three essential checks:
 1. **Schema Access**: Can the file be opened and metadata read? (proves file is not corrupted)
 2. **Count Verification**: Does the actual row count match the expected count? (proves file is complete)
+3. **Size Verification**: Does the file size match exactly? (proves upload integrity)
 
-This approach is much faster than full data validation while still catching the most common file corruption issues.
+This multi-layered approach ensures complete data integrity from generation through upload while maintaining high performance.
 
 ## Architecture Overview
 
@@ -205,7 +220,8 @@ milvus-ingest/
 │   ├── builtin_schemas.py      # Built-in schema definitions and metadata
 │   ├── generator.py            # Legacy generator (for compatibility)
 │   ├── verifier.py             # Comprehensive Milvus data verification system
-│   ├── minimal_validator.py    # Fast file integrity validation (schema + count)
+│   ├── minimal_validator.py    # Fast local file integrity validation (schema + count + size)
+│   ├── s3_minimal_validator.py # S3/MinIO upload validation with optimized streaming
 │   ├── lightweight_validator.py # More thorough validation with sampling (legacy)
 │   ├── file_merger.py          # File merging for chunk-and-merge strategy
 │   ├── rich_display.py         # Rich terminal formatting and progress bars
@@ -304,11 +320,25 @@ The system handles parameter conflicts intelligently:
 - File size estimation uses sampling of 1000 rows for accuracy
 
 ### Meta.json Structure
-Generated data includes a `meta.json` file with:
+Generated data includes a `meta.json` file with detailed file information:
 ```json
 {
   "schema": { ... },           // Original schema definition
-  "generation_info": { ... },  // Generation statistics and file list
+  "generation_info": {
+    "total_rows": 1000000,
+    "format": "parquet",
+    "data_files": [              // Detailed file information (new format)
+      {
+        "file_name": "data.parquet",
+        "file_path": "output/data.parquet", 
+        "rows": 1000000,
+        "file_index": 0,
+        "file_size_bytes": 157041    // Exact file size for validation
+      }
+    ],
+    "file_count": 1,
+    // ... other generation statistics
+  },
   "collection_config": {       // Milvus collection configuration
     "num_partitions": 8,
     "partition_key_field": "user_id",
@@ -321,6 +351,22 @@ Generated data includes a `meta.json` file with:
 - **Primary Key Uniqueness**: Ensured across all files using offset-based generation
 - **Partition Key Cardinality**: Unique values = `num_partitions × 10` for proper distribution
 - **Shard Distribution**: Based on primary key hash for even distribution across VChannels
+
+### JSON Format Support
+The system generates JSON files in **JSON Array format only** (`[{...}, {...}, ...]`) as required by Milvus bulk import:
+
+#### JSON Generation Strategy
+- **Format**: Always JSON Array format for Milvus compatibility
+- **Size Handling**: Small files (<32KB) for direct parsing, streaming for larger files
+- **Validation**: Optimized row counting with format-specific strategies:
+  - **Small files (<32KB)**: Direct JSON parsing 
+  - **Medium files (<10MB)**: Complete download and parsing
+  - **Large files (>10MB)**: Streaming array parser with 64KB chunks
+
+#### JSON vs Parquet Performance
+- **Parquet**: Fastest generation and validation (metadata-only reads)
+- **JSON**: Slower generation but better human readability
+- **Recommendation**: Use Parquet for large datasets, JSON for debugging/inspection
 
 ## Vector Index Strategy
 
@@ -371,6 +417,14 @@ milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket p
 2. **Memory Management**: Data is written in configurable batches (default 50K rows) to prevent memory exhaustion
 3. **File Partitioning**: Automatic file splitting based on size (256MB) or row count (1M) limits
 4. **Parallel Processing**: Vector normalization and certain generation tasks use multiple CPU cores
+
+### Validation Architecture Patterns
+1. **Zero-Tolerance Validation**: File sizes and row counts must match exactly (byte-level precision)
+2. **Optimized S3 Reading**: 
+   - **Parquet**: Uses S3 Range requests to read only metadata footer (8-64KB)
+   - **JSON**: Streaming parser for large files, direct parsing for small files
+3. **Multi-Stage Validation**: Local validation → Upload validation → Optional Milvus verification
+4. **Metadata-Driven**: All validation based on detailed file information stored in meta.json
 
 ### Schema Extension Points
 - Custom field types can be added by extending the `FieldSchema` model in `models.py`
