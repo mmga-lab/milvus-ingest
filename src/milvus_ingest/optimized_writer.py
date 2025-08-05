@@ -2562,6 +2562,12 @@ def generate_data_optimized(
     primary_key_field = None
 
     for field in fields:
+        # Identify special fields first (before skipping)
+        if field.get("is_partition_key", False):
+            partition_key_field = field
+        if field.get("is_primary", False):
+            primary_key_field = field
+
         # Skip auto_id fields - they should not be generated
         if field.get("auto_id", False):
             logger.info(f"Skipping auto_id field: {field['name']}")
@@ -2571,12 +2577,6 @@ def generate_data_optimized(
         if _is_bm25_output_field(field["name"], schema):
             logger.debug(f"Skipping BM25 output field: {field['name']}")
             continue
-
-        # Identify special fields
-        if field.get("is_partition_key", False):
-            partition_key_field = field
-        if field.get("is_primary", False):
-            primary_key_field = field
 
         if "Vector" in field["type"]:
             vector_fields.append(field)
@@ -2596,13 +2596,17 @@ def generate_data_optimized(
         )
 
     if num_shards:
-        if primary_key_field.get("auto_id", False):
+        if primary_key_field and primary_key_field.get("auto_id", False):
             logger.info(
                 f"Shard distribution enabled: {num_shards} shards using auto-generated primary key '{primary_key_field['name']}'"
             )
-        else:
+        elif primary_key_field:
             logger.info(
                 f"Shard distribution enabled: {num_shards} shards using primary key '{primary_key_field['name']}'"
+            )
+        else:
+            logger.warning(
+                f"num_shards specified ({num_shards}) but no primary key field found in schema"
             )
 
     # Use new parameter validation and calculation system
