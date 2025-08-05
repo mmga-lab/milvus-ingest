@@ -79,33 +79,23 @@ pipeline {
         choice(
             description: '''Built-in schema for comprehensive import testing. Available schemas:
 
-ADVANCED TESTING SCHEMAS (Primary Focus):
-• text_search_advanced - 17 fields, BM25 functions, all data types, 768d vectors
-• full_text_search - 11 fields, BM25 + semantic search, nullable fields, 768d vectors
-• default_values - 9 fields, default_value parameters, missing data handling, 768d vectors
-• dynamic_fields - 4 fields, dynamic field capabilities, schema evolution, 384d vectors
+CURRENT AVAILABLE SCHEMAS:
+• product_catalog - Simple product catalog with auto_id (4 fields, 128d vectors)
+• ecommerce_search - E-commerce with nullable fields (5 fields, 256d vectors)
+• news_articles - News with dynamic fields (4 fields, 768d vectors)
+• document_search - Document search with sparse vectors + BM25 (5 fields, 768d vectors)
+• multi_tenant_data - Multi-tenant with partitioning (5 fields, 256d vectors)
+• multimedia_content - Multiple vector types + nullable fields (7 fields, 256d+384d+128d vectors)
 
-DOMAIN-SPECIFIC SCHEMAS (Additional Coverage):
-• ecommerce - 12 fields, product catalog, multiple embeddings, 768d+512d vectors
-• documents - 12 fields, document search, semantic capabilities, 1536d vectors
-• images - 14 fields, image gallery, visual similarity, 2048d+512d vectors
-• users - 15 fields, user profiles, behavioral embeddings, 256d vectors
-• videos - 18 fields, video library, multimodal embeddings, 512d+1024d vectors
-• news - 19 fields, news articles, sentiment analysis, 384d+768d vectors
-
-Select based on specific testing requirements (BM25, dynamic fields, multi-vector, etc.)''',
+Select based on specific testing requirements (BM25, dynamic fields, multi-vector, partitioning, etc.)''',
             name: 'schema_type',
             choices: [
-                'text_search_advanced',  // 17 fields, BM25 functions, all data types, 768d vectors
-                'full_text_search',      // 11 fields, BM25 + semantic search, nullable fields, 768d vectors  
-                'default_values',        // 9 fields, default_value parameters, missing data handling, 768d vectors
-                'dynamic_fields',        // 4 fields, dynamic field capabilities, schema evolution, 384d vectors
-                'ecommerce',            // 12 fields, product catalog, multiple embeddings, 768d+512d vectors
-                'documents',            // 12 fields, document search, semantic capabilities, 1536d vectors
-                'images',               // 14 fields, image gallery, visual similarity, 2048d+512d vectors
-                'users',                // 15 fields, user profiles, behavioral embeddings, 256d vectors
-                'videos',               // 18 fields, video library, multimodal embeddings, 512d+1024d vectors
-                'news'                  // 19 fields, news articles, sentiment analysis, 384d+768d vectors
+                'product_catalog',     // Simple product catalog with auto_id (4 fields, 128d)
+                'ecommerce_search',    // E-commerce with nullable fields (5 fields, 256d)
+                'news_articles',       // News with dynamic fields (4 fields, 768d)
+                'document_search',     // Document search with sparse vectors + BM25 (5 fields, 768d)
+                'multi_tenant_data',   // Multi-tenant with partitioning (5 fields, 256d)
+                'multimedia_content'   // Multiple vector types + nullable fields (7 fields, 256d+384d+128d)
             ]
         )
         string(
@@ -114,9 +104,9 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             defaultValue: '10'
         )
         string(
-            description: 'File Size (e.g., 10GB, 200MB)',
+            description: 'File Size (e.g., 1GB, 100MB)',
             name: 'file_size',
-            defaultValue: '200MB'
+            defaultValue: '100MB'
         )
         choice(
             description: 'File Format',

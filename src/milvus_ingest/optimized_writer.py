@@ -218,27 +218,25 @@ def _calculate_file_size_from_count_and_rows(
     return GenerationParams(calculated_file_size, file_count, total_rows)
 
 
-def calculate_chunk_parameters(
+def calculate_file_parameters(
     file_size: str,
-    chunk_size: str,
     fields: list[dict[str, Any]],
     format: str,
     schema: dict[str, Any],
     seed: int | None = None,
-) -> tuple[int, int, int]:
+) -> int:
     """
-    Calculate chunk parameters based on file size and chunk size using sampling.
+    Calculate rows per file based on file size using sampling.
 
     Args:
         file_size: Target file size (e.g., "1GB", "512MB")
-        chunk_size: Chunk size (e.g., "512MB", "1GB")
         fields: Schema field definitions for sampling
         format: Output format ("parquet" or "json")
         schema: Full schema definition
         seed: Random seed for sampling
 
     Returns:
-        tuple of (rows_per_chunk, rows_per_file, chunks_per_file)
+        rows_per_file: Number of rows that fit in the target file size
     """
     # Use enhanced sampling to estimate bytes per row
     sample_size = 5000  # Good balance for estimation
@@ -246,184 +244,100 @@ def calculate_chunk_parameters(
         fields, sample_size, 0, format, schema, seed, num_iterations=3
     )
 
-    # Parse sizes
-    chunk_size_bytes = _parse_file_size(chunk_size)
+    # Parse file size
     file_size_bytes = _parse_file_size(file_size)
 
-    # Calculate rows per chunk and file
-    rows_per_chunk = max(1, int(chunk_size_bytes // actual_row_size_bytes))
+    # Calculate rows per file
     rows_per_file = max(1, int(file_size_bytes // actual_row_size_bytes))
 
-    # Calculate chunks per file
-    chunks_per_file = max(1, (rows_per_file + rows_per_chunk - 1) // rows_per_chunk)
-
     logger.info(
-        f"Chunk calculation: {actual_row_size_bytes:.1f} bytes/row → "
-        f"{rows_per_chunk:,} rows/chunk, {chunks_per_file} chunks/file"
+        f"File calculation: {actual_row_size_bytes:.1f} bytes/row → "
+        f"{rows_per_file:,} rows per file"
     )
 
-    return rows_per_chunk, rows_per_file, chunks_per_file
+    return rows_per_file
 
 
 def determine_generation_strategy(
     file_size: str,
     file_count: int,
-    chunk_size: str = "512MB",
 ) -> dict[str, Any]:
     """
     Determine the optimal generation strategy based on file characteristics.
 
-    Enhanced strategy selection for optimal multi-processing utilization:
-    - Small files (<chunk_size): Direct parallel file generation
-    - Large files + few count: Chunk-parallel with merge
-    - Many small files: Batch-parallel processing
-    - Many large files: Adaptive batch-chunk processing
+    Simplified strategy selection for direct parallel file generation:
+    - Few files: Direct parallel file generation
+    - Many files: Batch-parallel processing
 
     Args:
         file_size: Target file size (e.g., "1GB", "512MB")
         file_count: Number of files to generate
-        chunk_size: Chunk size for chunk-and-merge strategy
 
     Returns:
         Dictionary with strategy information including worker optimization
     """
     file_size_bytes = _parse_file_size(file_size)
-    chunk_size_bytes = _parse_file_size(chunk_size)
     file_size_mb = file_size_bytes / (1024**2)
-    file_size_gb = file_size_bytes / (1024**3)
     cpu_count = multiprocessing.cpu_count()
 
-    chunks_per_file = (
-        (file_size_bytes + chunk_size_bytes - 1) // chunk_size_bytes
-        if file_size_bytes >= chunk_size_bytes
-        else 1
-    )
-    total_chunks = chunks_per_file * file_count
-
-    # Strategy 1: Small files (< chunk_size) - Direct parallel
-    if file_size_bytes < chunk_size_bytes:
-        if file_count <= cpu_count * 2:
-            # Few small files: full parallelism
-            return {
-                "strategy": "direct_parallel",
-                "reason": f"Small files ({file_size_mb:.0f}MB < {chunk_size}), count manageable ({file_count})",
-                "chunks_per_file": 1,
-                "use_chunk_and_merge": False,
-                "max_parallel_files": min(file_count, cpu_count * 2),
-                "memory_profile": "low",
-                "optimization": "cpu_bound",
-            }
-        else:
-            # Many small files: batch processing
-            batch_size = cpu_count * 4  # Process more files per batch for small files
-            return {
-                "strategy": "batch_direct_parallel",
-                "reason": f"Many small files ({file_count}), using batch processing",
-                "chunks_per_file": 1,
-                "use_chunk_and_merge": False,
-                "batch_size": batch_size,
-                "max_parallel_files": cpu_count * 2,
-                "memory_profile": "low",
-                "optimization": "throughput_optimized",
-            }
-
-    # Strategy 2: Large files (>= chunk_size)
-
-    # 2.1: Few large files - Full chunk parallelism (e.g., 10×10GB)
-    if file_count <= 20 and file_size_gb >= 2:
+    # Strategy 1: Few files - Direct parallel
+    if file_count <= cpu_count * 2:
         return {
-            "strategy": "chunk_parallel_merge",
-            "reason": f"Few large files ({file_count}×{file_size_gb:.1f}GB), maximize chunk parallelism",
-            "chunks_per_file": chunks_per_file,
-            "use_chunk_and_merge": True,
-            "max_parallel_chunks": min(
-                total_chunks, cpu_count * 3
-            ),  # Aggressive parallelism
-            "memory_profile": "high" if file_size_gb >= 5 else "medium",
-            "optimization": "chunk_parallel_optimized",
+            "strategy": "direct_parallel",
+            "reason": f"Manageable file count ({file_count}), using direct parallel generation",
+            "max_parallel_files": min(file_count, cpu_count * 2),
+            "memory_profile": "medium" if file_size_mb >= 500 else "low",
+            "optimization": "cpu_bound",
         }
 
-    # 2.2: Many medium files - Balanced approach (e.g., 1000×100MB)
-    elif file_count >= 100 and file_size_bytes < 2 * 1024**3:  # < 2GB per file
-        # For many medium files, use file-level batching rather than chunk-level
-        return {
-            "strategy": "batch_file_parallel",
-            "reason": f"Many medium files ({file_count}×{file_size_mb:.0f}MB), file-level batching",
-            "chunks_per_file": chunks_per_file,
-            "use_chunk_and_merge": True,
-            "batch_size": max(10, cpu_count),  # Process 10+ files per batch
-            "max_parallel_files": cpu_count,
-            "memory_profile": "medium",
-            "optimization": "balanced_throughput",
-        }
-
-    # 2.3: Medium scale - Standard chunk processing
-    elif total_chunks <= cpu_count * 4:
-        return {
-            "strategy": "chunk_parallel_merge",
-            "reason": f"Medium scale ({total_chunks} chunks), standard chunk processing",
-            "chunks_per_file": chunks_per_file,
-            "use_chunk_and_merge": True,
-            "max_parallel_chunks": min(total_chunks, cpu_count * 2),
-            "memory_profile": "medium",
-            "optimization": "standard",
-        }
-
-    # 2.4: Large scale - Adaptive batch-chunk processing
+    # Strategy 2: Many files - Batch processing
     else:
-        # For very large scale, use adaptive batching
-        if file_size_gb >= 5:
-            # Very large files: conservative batching
-            batch_size = max(5, cpu_count // 2)
-        elif file_size_gb >= 1:
-            # Large files: moderate batching
-            batch_size = max(10, cpu_count)
-        else:
-            # Medium files: aggressive batching
-            batch_size = cpu_count * 2
-
+        batch_size = max(10, cpu_count * 2)
         return {
-            "strategy": "adaptive_batch_chunk_merge",
-            "reason": f"Large scale ({total_chunks} chunks), adaptive batch processing",
-            "chunks_per_file": chunks_per_file,
-            "use_chunk_and_merge": True,
+            "strategy": "batch_direct_parallel",
+            "reason": f"Many files ({file_count}), using batch processing",
             "batch_size": batch_size,
-            "max_parallel_chunks": cpu_count,
-            "memory_profile": "high" if file_size_gb >= 2 else "medium",
-            "optimization": "memory_conscious",
+            "max_parallel_files": cpu_count,
+            "memory_profile": "medium" if file_size_mb >= 500 else "low",
+            "optimization": "throughput_optimized",
         }
 
 
-def enhanced_sampling_for_chunks(
+def enhanced_sampling_for_files(
     schema: dict[str, Any],
     file_size: str,
-    chunk_size: str = "512MB",
     format: str = "parquet",
     seed: int | None = None,
 ) -> tuple[int, int, float]:
     """
-    智能採样系统：生成少量样本数据来准确估算每行的字节数和chunk参数
+    智能採样系统：生成少量样本数据来准确估算每行的字节数和参数
 
     Args:
         schema: Complete schema definition
-        file_size: Target file size
-        chunk_size: Chunk size (default 512MB)
+        file_size: Target file size (default 512MB)
         format: Output format
         seed: Random seed
 
     Returns:
-        tuple of (rows_per_chunk, rows_per_file, bytes_per_row)
+        tuple of (rows_per_file, bytes_per_row)
     """
     fields = schema.get("fields", schema)
 
-    return calculate_chunk_parameters(
+    rows_per_file = calculate_file_parameters(
         file_size=file_size,
-        chunk_size=chunk_size,
         fields=fields,
         format=format,
         schema=schema,
         seed=seed,
     )
+
+    # Estimate bytes per row using sampling
+    sample_size = 5000
+    actual_row_size_bytes, _ = _enhanced_estimate_row_size_from_sample(
+        fields, sample_size, 0, format, schema, seed, num_iterations=3
+    )
+
+    return rows_per_file, actual_row_size_bytes
 
 
 def _is_bm25_output_field(field_name: str, schema: dict[str, Any]) -> bool:
@@ -537,33 +451,12 @@ def adjust_workers_by_strategy(
         max_workers = strategy_info.get("max_parallel_files", cpu_count * 2)
         adjusted_workers = min(num_workers, max_workers)
 
-    elif strategy == "chunk_parallel_merge":
-        # For chunk parallel: adjust based on memory profile
-        if memory_profile == "high":
-            # Conservative for large files
-            adjusted_workers = min(num_workers, max(1, cpu_count // 2))
-        elif memory_profile == "medium":
-            # Balanced approach
-            adjusted_workers = min(num_workers, cpu_count)
-        else:
-            # Aggressive for small chunks
-            max_chunks = strategy_info.get("max_parallel_chunks", cpu_count * 2)
-            adjusted_workers = min(num_workers, max_chunks)
-
     elif strategy == "batch_file_parallel":
         # For batch file processing: use batch-optimized workers
         batch_size = strategy_info.get("batch_size", cpu_count)
         max_workers = strategy_info.get("max_parallel_files", cpu_count)
         adjusted_workers = min(num_workers, max_workers)
 
-    elif strategy == "adaptive_batch_chunk_merge":
-        # For adaptive processing: memory-conscious approach
-        if file_size_gb >= 5:
-            adjusted_workers = min(num_workers, max(1, cpu_count // 4))
-        elif file_size_gb >= 2:
-            adjusted_workers = min(num_workers, max(2, cpu_count // 2))
-        else:
-            adjusted_workers = min(num_workers, cpu_count)
     else:
         # Fallback: use original size-based logic
         if file_size_gb >= 5:
@@ -586,11 +479,7 @@ def adjust_workers_by_strategy(
             f"High memory profile detected. Using {adjusted_workers} workers for "
             f"{file_count}×{file_size_gb:.1f}GB files. Monitor memory usage."
         )
-    elif optimization == "chunk_parallel_optimized":
-        logger.info(
-            f"Chunk-parallel optimization enabled: {adjusted_workers} workers for "
-            f"maximum chunk throughput ({strategy_info.get('chunks_per_file', 1)} chunks/file)"
-        )
+    # chunk_parallel_optimized removed - no longer supported
 
     return max(1, adjusted_workers)  # Always at least 1 worker
 
@@ -796,7 +685,8 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
         format = file_info["format"]
         batch_size = file_info["batch_size"]
         seed = file_info["seed"]
-        
+        # is_chunk_generation removed - no longer needed
+
         num_partitions = file_info.get("num_partitions")
 
         # Set process-specific seed to ensure different random data per process
@@ -837,15 +727,11 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
 
         # Generate data
         data: dict[str, Any] = {}
-        
-        # Calculate chunks for progress tracking
-        chunk_size = batch_size
-        total_chunks = (current_batch_rows + chunk_size - 1) // chunk_size
-        
+
         # Log initial progress
         logger.warning(
             f"📊 File {file_index + 1}/{total_files}: starting generation "
-            f"({current_batch_rows:,} rows in {total_chunks} chunks)"
+            f"({current_batch_rows:,} rows in batches of {batch_size:,})"
         )
 
         # Generate partition key with enough unique values (if partition key exists)
@@ -861,7 +747,9 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
             data[partition_key_field["name"]] = partition_values
 
         # Generate remaining scalar fields efficiently
-        logger.warning(f"📊 File {file_index + 1}/{total_files}: generating scalar fields")
+        logger.warning(
+            f"📊 File {file_index + 1}/{total_files}: generating scalar fields"
+        )
         for field in scalar_fields:
             field_name = field["name"]
             field_type = field["type"]
@@ -1082,6 +970,12 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
         for field in vector_fields:
             field_name = field["name"]
             field_type = field["type"]
+
+            # Skip BM25 function output fields - they are auto-generated by Milvus
+            if _is_bm25_output_field(field_name, schema):
+                logger.debug(f"Skipping BM25 output vector field: {field_name}")
+                continue
+
             dim = field.get("dim", 128)
 
             if field_type == "FloatVector":
@@ -1182,16 +1076,27 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
         # Apply Parquet column optimization (only for Parquet format)
         optimization_info = {}
         if format.lower() == "parquet":
-            df, optimization_info = _optimize_parquet_columns(df, fields, format)
+            df, optimization_info = _optimize_parquet_columns(
+                df, fields, format, disable_optimization=False
+            )
 
-        # Convert JSON fields to strings for Parquet storage
+        # Convert JSON fields and sparse vectors to strings for Parquet storage
         if format.lower() == "parquet":
-            # Handle regular JSON fields
+            # Handle regular JSON fields and sparse vectors
             for field in fields:
                 if field["type"] == "JSON":
                     field_name = field["name"]
                     if field_name in df.columns:
                         # Convert JSON objects to JSON strings for Parquet storage
+                        df[field_name] = df[field_name].apply(
+                            lambda x: json.dumps(x, ensure_ascii=False)
+                            if x is not None
+                            else None
+                        )
+                elif field["type"] == "SparseFloatVector":
+                    field_name = field["name"]
+                    if field_name in df.columns:
+                        # Convert sparse vector dicts to JSON strings for Parquet storage
                         df[field_name] = df[field_name].apply(
                             lambda x: json.dumps(x, ensure_ascii=False)
                             if x is not None
@@ -1218,17 +1123,17 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
                     output_dir / f"data-{file_num:05d}-of-{total_files:05d}.parquet"
                 )
 
-            # Create explicit PyArrow schema to ensure consistency across chunks
+            # Create explicit PyArrow schema to ensure consistency
             pa_schema_fields = []
             for field in fields:
                 field_name = field["name"]
                 field_type = field["type"]
                 is_nullable = field.get("nullable", False)
-                
+
                 # Skip fields not in DataFrame (e.g., sparse vectors handled separately)
                 if field_name not in df.columns:
                     continue
-                
+
                 # Map Milvus types to PyArrow types
                 if field_type == "Int8":
                     pa_type = pa.int8()
@@ -1268,20 +1173,25 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
                     pa_type = pa.list_(pa.uint8())  # These are stored as uint8 arrays
                 elif field_type == "BinaryVector":
                     pa_type = pa.list_(pa.uint8())
+                elif field_type == "SparseFloatVector":
+                    # Sparse vectors are stored as JSON strings in Parquet
+                    pa_type = pa.string()
                 else:
                     # Default to string for unknown types
                     pa_type = pa.string()
-                
+
                 # Add field to schema
-                pa_schema_fields.append(pa.field(field_name, pa_type, nullable=is_nullable))
-            
+                pa_schema_fields.append(
+                    pa.field(field_name, pa_type, nullable=is_nullable)
+                )
+
             # Add dynamic field if present
             if "$meta" in df.columns:
                 pa_schema_fields.append(pa.field("$meta", pa.string(), nullable=True))
-            
+
             # Create PyArrow schema
             pa_schema = pa.schema(pa_schema_fields)
-            
+
             # Convert to PyArrow table with explicit schema
             table = pa.Table.from_pandas(df, schema=pa_schema)
 
@@ -1421,6 +1331,7 @@ def _generate_files_parallel(
     estimation_stats: dict[str, Any],
     file_size: str | None = None,
     skip_validation: bool = False,
+    # is_chunk_generation parameter removed
 ) -> tuple[list[str], int]:
     """
     Generate multiple files in parallel using ProcessPoolExecutor.
@@ -1452,6 +1363,7 @@ def _generate_files_parallel(
             "seed": seed,
             "num_partitions": num_partitions,
             "num_shards": num_shards,
+            # is_chunk_generation removed from file_info
         }
 
         file_tasks.append(file_info)
@@ -2232,7 +2144,10 @@ def _detect_uniform_column(
 
 
 def _optimize_parquet_columns(
-    df: pd.DataFrame, schema_fields: list[dict[str, Any]], format_type: str
+    df: pd.DataFrame,
+    schema_fields: list[dict[str, Any]],
+    format_type: str,
+    disable_optimization: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Optimize Parquet DataFrame by detecting and removing columns with uniform values.
@@ -2242,12 +2157,19 @@ def _optimize_parquet_columns(
         df: DataFrame to optimize
         schema_fields: Original schema field definitions
         format_type: Output format ('parquet' or 'json')
+        disable_optimization: If True, skip optimization for schema consistency
 
     Returns:
         Tuple of (optimized_df, optimization_info)
     """
     if format_type.lower() != "parquet":
         # Only optimize Parquet format
+        return df, {}
+
+    if disable_optimization:
+        logger.debug(
+            "Column optimization disabled - ensuring schema consistency"
+        )
         return df, {}
 
     optimization_info = {}
@@ -2574,15 +2496,13 @@ def generate_data_optimized(
     batch_size: int = 50000,
     seed: int | None = None,
     file_size: str | None = None,
-    rows_per_file: int = 1000000,
     progress_callback: Any = None,
     num_partitions: int | None = None,
     num_shards: int | None = None,
     file_count: int | None = None,
     num_workers: int | None = None,
-    chunk_and_merge: bool = False,
-    chunk_size: str = "512MB",
     skip_validation: bool = False,
+    # is_chunk_generation parameter removed
 ) -> tuple[list[str], int]:
     """
     Optimized data generation using vectorized NumPy operations with file partitioning.
@@ -2593,39 +2513,28 @@ def generate_data_optimized(
     3. Batch processing with automatic file partitioning
     4. Efficient Parquet/JSON writing
     5. Minimal memory copying
-    6. Smart file splitting based on size and row count
+    6. Smart file splitting based on size constraints
 
     Args:
-        max_file_size_mb: Maximum size per file in MB (default: 256MB)
-        max_rows_per_file: Maximum rows per file (default: 1M rows)
+        schema_path: Path to the schema JSON file
+        total_rows: Total number of rows to generate
+        output_dir: Directory to save generated files
+        format: Output format ("parquet" or "json")
+        batch_size: Number of rows to process in each batch
+        seed: Random seed for reproducibility
+        file_size: Target file size (e.g., "256MB", "1GB")
+        progress_callback: Optional callback for progress updates
+        num_partitions: Number of partitions for partition key distribution
+        num_shards: Number of shards for primary key distribution
+        file_count: Number of files to generate
+        num_workers: Number of worker processes
+        skip_validation: Skip parameter validation
+        # is_chunk_generation parameter removed - no longer supports chunk-based generation
 
     Returns:
         tuple[list[str], int]: A tuple containing (list of created file paths, actual total rows generated)
     """
     start_time = time.time()
-
-    # If chunk-and-merge is explicitly requested and we have file_count + file_size,
-    # we need to defer it until we calculate the actual total rows
-    defer_chunk_merge = chunk_and_merge and file_size and file_count
-
-    # If chunk-and-merge is requested but we're not deferring, use it now
-    if chunk_and_merge and not defer_chunk_merge:
-        return _generate_with_chunk_and_merge(
-            schema_path=schema_path,
-            total_rows=total_rows,
-            output_dir=output_dir,
-            format=format,
-            batch_size=batch_size,
-            seed=seed,
-            file_size=file_size,
-            rows_per_file=rows_per_file,
-            progress_callback=progress_callback,
-            num_partitions=num_partitions,
-            num_shards=num_shards,
-            file_count=file_count,
-            num_workers=num_workers,
-            chunk_size=chunk_size,
-        )
 
     # Load schema
     with open(schema_path) as f:
@@ -2664,7 +2573,7 @@ def generate_data_optimized(
 
         # Skip BM25 function output fields - they are auto-generated by Milvus
         if _is_bm25_output_field(field["name"], schema):
-            logger.info(f"Skipping BM25 output field: {field['name']}")
+            logger.debug(f"Skipping BM25 output field: {field['name']}")
             continue
 
         # Identify special fields
@@ -2748,7 +2657,6 @@ def generate_data_optimized(
     strategy_info = determine_generation_strategy(
         file_size=file_size,
         file_count=file_count,
-        chunk_size=chunk_size,
     )
 
     logger.info(
@@ -2760,45 +2668,7 @@ def generate_data_optimized(
         f"optimization={strategy_info.get('optimization', 'N/A')}"
     )
 
-    # Check if we should use chunk-and-merge strategy
-    should_use_chunk_merge = chunk_and_merge or defer_chunk_merge
-
-    if file_size and not should_use_chunk_merge:
-        file_size_bytes = _parse_file_size(file_size)
-        file_size_mb = file_size_bytes / (1024**2)
-        logger.debug(f"File size: {file_size} = {file_size_mb:.1f}MB")
-
-        # Auto-enable chunk-and-merge for files >= 512MB (updated threshold)
-        if file_size_mb >= 512:
-            should_use_chunk_merge = True
-            logger.info(
-                f"Auto-enabling chunk-and-merge for file size ≥512MB ({file_size_mb:.1f}MB). "
-                f"This improves performance for medium-to-large file generation."
-            )
-
-    if should_use_chunk_merge:
-        # Use chunk-and-merge strategy with validated parameters
-        logger.info(
-            f"🔍 DEBUG: Using chunk-and-merge with rows={rows}, files={file_count}, size={file_size}"
-        )
-        return _generate_with_chunk_and_merge(
-            schema_path=schema_path,
-            total_rows=rows,
-            output_dir=output_dir,
-            format=format,
-            batch_size=batch_size,
-            seed=seed,
-            file_size=file_size,
-            rows_per_file=rows_per_file,
-            progress_callback=progress_callback,
-            num_partitions=num_partitions,
-            num_shards=num_shards,
-            file_count=file_count,
-            num_workers=num_workers,
-            chunk_size=chunk_size,
-        )
-
-    # Calculate effective parameters for regular (non-chunk) generation
+    # Calculate effective parameters for data generation
     logger.info(
         f"🔍 DEBUG: Using regular generation with rows={rows}, files={file_count}, size={file_size}"
     )
@@ -2869,6 +2739,7 @@ def generate_data_optimized(
             estimation_stats=estimation_stats,
             file_size=file_size,
             skip_validation=skip_validation,
+            # is_chunk_generation parameter removed
         )
     else:
         logger.info(f"📝 Using serial generation: {total_files} file(s)")
@@ -3134,6 +3005,12 @@ def generate_data_optimized(
         for field in vector_fields:
             field_name = field["name"]
             field_type = field["type"]
+
+            # Skip BM25 function output fields - they are auto-generated by Milvus
+            if _is_bm25_output_field(field_name, schema):
+                logger.debug(f"Skipping BM25 output vector field: {field_name}")
+                continue
+
             dim = field.get("dim", 128)
 
             if field_type == "FloatVector":
@@ -3235,9 +3112,15 @@ def generate_data_optimized(
         df = pd.DataFrame(data)
 
         # Apply Parquet column optimization (only for Parquet format)
+        # Note: This is the legacy function
         optimization_info = {}
         if format.lower() == "parquet":
-            df, optimization_info = _optimize_parquet_columns(df, fields, format)
+            df, optimization_info = _optimize_parquet_columns(
+                df,
+                fields,
+                format,
+                disable_optimization=False,  # Legacy function, always enable
+            )
 
         # Collect optimization info if any optimizations were made
         if optimization_info and "_summary" in optimization_info:
@@ -3253,14 +3136,23 @@ def generate_data_optimized(
 
         # No need to collect complex distribution info - just record basic stats
 
-        # Convert JSON fields to strings for Parquet storage
+        # Convert JSON fields and sparse vectors to strings for Parquet storage
         if format.lower() == "parquet":
-            # Handle regular JSON fields
+            # Handle regular JSON fields and sparse vectors
             for field in fields:
                 if field["type"] == "JSON":
                     field_name = field["name"]
                     if field_name in df.columns:
                         # Convert JSON objects to JSON strings for Parquet storage
+                        df[field_name] = df[field_name].apply(
+                            lambda x: json.dumps(x, ensure_ascii=False)
+                            if x is not None
+                            else None
+                        )
+                elif field["type"] == "SparseFloatVector":
+                    field_name = field["name"]
+                    if field_name in df.columns:
+                        # Convert sparse vector dicts to JSON strings for Parquet storage
                         df[field_name] = df[field_name].apply(
                             lambda x: json.dumps(x, ensure_ascii=False)
                             if x is not None
@@ -3287,17 +3179,17 @@ def generate_data_optimized(
                     output_dir / f"data-{file_num:05d}-of-{total_files:05d}.parquet"
                 )
 
-            # Create explicit PyArrow schema to ensure consistency across chunks
+            # Create explicit PyArrow schema to ensure consistency
             pa_schema_fields = []
             for field in fields:
                 field_name = field["name"]
                 field_type = field["type"]
                 is_nullable = field.get("nullable", False)
-                
+
                 # Skip fields not in DataFrame (e.g., sparse vectors handled separately)
                 if field_name not in df.columns:
                     continue
-                
+
                 # Map Milvus types to PyArrow types
                 if field_type == "Int8":
                     pa_type = pa.int8()
@@ -3337,20 +3229,25 @@ def generate_data_optimized(
                     pa_type = pa.list_(pa.uint8())  # These are stored as uint8 arrays
                 elif field_type == "BinaryVector":
                     pa_type = pa.list_(pa.uint8())
+                elif field_type == "SparseFloatVector":
+                    # Sparse vectors are stored as JSON strings in Parquet
+                    pa_type = pa.string()
                 else:
                     # Default to string for unknown types
                     pa_type = pa.string()
-                
+
                 # Add field to schema
-                pa_schema_fields.append(pa.field(field_name, pa_type, nullable=is_nullable))
-            
+                pa_schema_fields.append(
+                    pa.field(field_name, pa_type, nullable=is_nullable)
+                )
+
             # Add dynamic field if present
             if "$meta" in df.columns:
                 pa_schema_fields.append(pa.field("$meta", pa.string(), nullable=True))
-            
+
             # Create PyArrow schema
             pa_schema = pa.schema(pa_schema_fields)
-            
+
             # Convert to PyArrow table with explicit schema
             table = pa.Table.from_pandas(df, schema=pa_schema)
 
@@ -3494,7 +3391,7 @@ def generate_data_optimized(
             "seed": seed,
             "data_files": all_files_info,
             "file_count": len(all_files_created),
-            "max_rows_per_file": rows_per_file,
+            "max_rows_per_file": effective_max_rows_per_file,
             "max_file_size_mb": target_file_size_mb,
             "generation_time": total_generation_time,
             "write_time": total_write_time,
@@ -3628,349 +3525,3 @@ def generate_data_optimized(
             # Don't fail the generation if validation fails
 
     return all_files_created, rows
-
-
-def _generate_single_chunk(
-    schema_path: Path,
-    chunk_output_dir: Path,
-    chunk_rows: int,
-    format: str,
-    batch_size: int,
-    seed: int | None,
-    num_partitions: int | None,
-    num_shards: int | None,
-    chunk_id: int,
-    chunk_size: str,  # Add chunk_size parameter
-) -> list[str]:
-    """
-    Generate a single chunk file directly without further subdivision.
-    This function is designed to be called from ProcessPoolExecutor.
-
-    Returns:
-        List of generated file paths (should be exactly one file)
-    """
-    # Use single-threaded generation for individual chunks
-    # This generates chunks as single files without internal subdivision
-    chunk_files_created, _ = generate_data_optimized(
-        schema_path=schema_path,
-        total_rows=chunk_rows,
-        output_dir=chunk_output_dir,
-        format=format,
-        batch_size=batch_size,
-        seed=seed,
-        file_size=None,  # Don't use file size control for chunks
-        rows_per_file=chunk_rows,  # Single file per chunk
-        progress_callback=None,  # Disable individual progress bars
-        num_partitions=num_partitions,
-        num_shards=num_shards,
-        file_count=None,
-        num_workers=1,  # IMPORTANT: Use single worker for each chunk
-        chunk_and_merge=False,  # Prevent recursion
-        skip_validation=True,  # Skip validation for temporary chunks
-    )
-
-    return chunk_files_created
-
-
-def _generate_with_chunk_and_merge(
-    schema_path: Path,
-    total_rows: int,
-    output_dir: Path,
-    format: str = "parquet",
-    batch_size: int = 50000,
-    seed: int | None = None,
-    file_size: str | None = None,
-    rows_per_file: int = 1000000,
-    progress_callback: Any = None,
-    num_partitions: int | None = None,
-    num_shards: int | None = None,
-    file_count: int | None = None,
-    num_workers: int | None = None,
-    chunk_size: str = "512MB",
-) -> tuple[list[str], int]:
-    """
-    Generate data using chunk-and-merge strategy for better performance on large files.
-
-    This strategy:
-    1. Determines if chunk-and-merge would be beneficial
-    2. Generates multiple smaller chunks in parallel
-    3. Merges chunks into final large files
-    4. Cleans up temporary files
-    """
-    import shutil
-
-    from .file_merger import FileMerger
-
-    start_time = time.time()
-    logger.info("🚀 Using chunk-and-merge strategy for large file generation")
-
-    # Parse chunk size
-    chunk_size_bytes = _parse_file_size(chunk_size)
-    target_file_size_bytes = (
-        _parse_file_size(file_size) if file_size else (256 * 1024 * 1024)
-    )  # 256MB default
-
-    # Determine if chunk-and-merge is beneficial
-    if target_file_size_bytes < (2 * 1024 * 1024 * 1024):  # Less than 2GB
-        logger.info("Target file size < 2GB, using standard generation instead")
-        # Call original function without chunk_and_merge flag
-        return generate_data_optimized(
-            schema_path=schema_path,
-            total_rows=total_rows,
-            output_dir=output_dir,
-            format=format,
-            batch_size=batch_size,
-            seed=seed,
-            file_size=file_size,
-            rows_per_file=rows_per_file,
-            progress_callback=progress_callback,
-            num_partitions=num_partitions,
-            num_shards=num_shards,
-            file_count=file_count,
-            num_workers=num_workers,
-            chunk_and_merge=False,
-            skip_validation=False,  # Still validate when falling back to standard generation
-        )
-
-    # Calculate chunk parameters
-    num_chunks = max(1, target_file_size_bytes // chunk_size_bytes)
-    rows_per_chunk = max(1000, total_rows // num_chunks)  # At least 1000 rows per chunk
-
-    logger.info(
-        f"Generating {num_chunks} chunks of ~{chunk_size} each ({rows_per_chunk:,} rows per chunk)"
-    )
-
-    # Create temporary directory for chunks
-    temp_dir = output_dir / ".chunks_temp"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        # Generate all chunks in parallel using ProcessPoolExecutor
-        chunk_files = []
-
-        # Prepare chunk generation tasks
-        chunk_tasks = []
-        remaining_rows = total_rows
-
-        for i in range(num_chunks):
-            chunk_rows = min(rows_per_chunk, remaining_rows)
-            if chunk_rows <= 0:
-                break
-
-            chunk_seed = (seed + i * 10000) if seed else None
-            chunk_output_dir = temp_dir / f"chunk_{i:05d}"
-
-            chunk_tasks.append(
-                {
-                    "chunk_id": i,
-                    "chunk_rows": chunk_rows,
-                    "chunk_seed": chunk_seed,
-                    "chunk_output_dir": chunk_output_dir,
-                }
-            )
-
-            remaining_rows -= chunk_rows
-
-        logger.info(
-            f"Generating {len(chunk_tasks)} chunks in parallel using {min(num_workers, len(chunk_tasks))} worker(s)"
-        )
-
-        # Use ProcessPoolExecutor to generate chunks in parallel
-        actual_workers = min(
-            num_workers, len(chunk_tasks)
-        )  # Don't use more workers than chunks
-
-        with ProcessPoolExecutor(max_workers=actual_workers) as executor:
-            # Submit all chunk generation tasks
-            future_to_chunk = {}
-            for task in chunk_tasks:
-                future = executor.submit(
-                    _generate_single_chunk,
-                    schema_path=schema_path,
-                    chunk_output_dir=task["chunk_output_dir"],
-                    chunk_rows=task["chunk_rows"],
-                    format=format,
-                    batch_size=batch_size,
-                    seed=task["chunk_seed"],
-                    num_partitions=num_partitions,
-                    num_shards=num_shards,
-                    chunk_id=task["chunk_id"],
-                    chunk_size=chunk_size,
-                )
-                future_to_chunk[future] = task
-
-            # Collect results as they complete
-            for future in as_completed(future_to_chunk):
-                task = future_to_chunk[future]
-                try:
-                    chunk_file_paths = future.result()
-                    for chunk_file_path in chunk_file_paths:
-                        chunk_files.append(Path(chunk_file_path))
-                    logger.info(
-                        f"Completed chunk {task['chunk_id'] + 1}/{len(chunk_tasks)} ({task['chunk_rows']:,} rows)"
-                    )
-                except Exception as e:
-                    logger.error(f"Chunk {task['chunk_id'] + 1} failed: {e}")
-                    raise
-
-        logger.info(f"Generated {len(chunk_files)} chunk files, now merging...")
-
-        # Merge chunks into final file(s)
-        merger = FileMerger(temp_dir=temp_dir)
-        final_files = []
-
-        if file_count and file_count > 1:
-            # Multiple output files: distribute chunks across files
-            chunks_per_file = len(chunk_files) // file_count
-            extra_chunks = len(chunk_files) % file_count
-
-            chunk_idx = 0
-            for file_idx in range(file_count):
-                file_chunks_count = chunks_per_file + (
-                    1 if file_idx < extra_chunks else 0
-                )
-                file_chunk_list = chunk_files[chunk_idx : chunk_idx + file_chunks_count]
-
-                if file_chunk_list:
-                    final_filename = (
-                        f"data-{file_idx + 1:05d}-of-{file_count:05d}.{format}"
-                    )
-                    final_file_path = output_dir / final_filename
-
-                    merge_stats = merger.merge_files(
-                        chunk_files=file_chunk_list,
-                        output_file=final_file_path,
-                        file_format=format,
-                        cleanup_chunks=False,  # Do not cleanup yet
-                    )
-
-                    final_files.append(str(final_file_path))
-                    logger.info(
-                        f"Merged {merge_stats['chunks_merged']} chunks into {final_filename}"
-                    )
-
-                chunk_idx += file_chunks_count
-        else:
-            # Single output file
-            final_filename = f"data.{format}"
-            final_file_path = output_dir / final_filename
-
-            merge_stats = merger.merge_files(
-                chunk_files=chunk_files,
-                output_file=final_file_path,
-                file_format=format,
-                cleanup_chunks=False,  # Do not cleanup yet
-            )
-
-            final_files.append(str(final_file_path))
-            logger.info(
-                f"Merged {merge_stats['chunks_merged']} chunks into {final_filename}"
-            )
-
-        total_time = time.time() - start_time
-        logger.info(f"Chunk-and-merge completed in {total_time:.1f}s")
-        logger.info(
-            f"Generated {len(final_files)} final file(s) from {len(chunk_files)} chunks"
-        )
-
-        # Generate meta.json file for the final merged files
-        def convert_numpy_types(obj):
-            """Convert numpy types to native Python types for JSON serialization."""
-            if isinstance(obj, np.integer):
-                return int(obj)
-            elif isinstance(obj, np.floating):
-                return float(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
-            elif isinstance(obj, dict):
-                return {key: convert_numpy_types(value) for key, value in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_numpy_types(item) for item in obj]
-            else:
-                return obj
-
-        # Load schema from file
-        with open(schema_path) as f:
-            schema = json.load(f)
-
-        # Create metadata for final files
-        data_files_info = []
-        actual_total_rows = 0
-        for i, file_path in enumerate(final_files):
-            file_path_obj = Path(file_path)
-            file_size = file_path_obj.stat().st_size
-
-            # Read actual row count from parquet file
-            try:
-                if format.lower() == "parquet":
-                    pf = pq.ParquetFile(file_path)
-                    file_rows = pf.metadata.num_rows
-                else:
-                    # For JSON, we'll use the passed total_rows as approximation
-                    # since reading JSON row count is expensive
-                    file_rows = total_rows // len(final_files)
-                    if i == len(final_files) - 1:  # Last file gets remaining rows
-                        file_rows = total_rows - (total_rows // len(final_files)) * (
-                            len(final_files) - 1
-                        )
-            except Exception as e:
-                logger.warning(f"Could not read row count from {file_path}: {e}")
-                file_rows = (
-                    total_rows // len(final_files) if len(final_files) > 0 else 0
-                )
-                if i == len(final_files) - 1:  # Last file gets remaining rows
-                    file_rows = total_rows - (total_rows // len(final_files)) * (
-                        len(final_files) - 1
-                    )
-
-            actual_total_rows += file_rows
-
-            data_files_info.append(
-                {
-                    "file_name": file_path_obj.name,
-                    "file_path": str(file_path_obj.relative_to(output_dir)),
-                    "rows": file_rows,
-                    "file_index": i,
-                    "file_size_bytes": file_size,
-                }
-            )
-
-        metadata = {
-            "schema": schema,
-            "generation_info": {
-                "total_rows": actual_total_rows,
-                "format": format,
-                "data_files": data_files_info,
-                "file_count": len(final_files),
-                "generation_method": "chunk_and_merge",
-                "chunk_size": chunk_size,
-                "chunks_generated": len(chunk_files),
-                "total_time_seconds": total_time,
-                "rows_per_second": int(actual_total_rows / total_time)
-                if total_time > 0
-                else 0,
-            },
-        }
-
-        # Add partition/shard info if applicable
-        if num_partitions:
-            metadata["collection_config"] = {"num_partitions": num_partitions}
-            if num_shards:
-                metadata["collection_config"]["num_shards"] = num_shards
-
-        # Save metadata
-        meta_file = output_dir / "meta.json"
-        serializable_metadata = convert_numpy_types(metadata)
-        with open(meta_file, "w") as f:
-            json.dump(serializable_metadata, f, indent=2)
-
-        return final_files, total_rows
-
-    finally:
-        # Always cleanup temporary directory
-        if temp_dir.exists():
-            try:
-                shutil.rmtree(temp_dir)
-                logger.info("Cleaned up temporary chunk files")
-            except Exception as e:
-                logger.warning(f"Failed to cleanup temporary directory {temp_dir}: {e}")
