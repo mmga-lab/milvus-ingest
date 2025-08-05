@@ -1,0 +1,33 @@
+{
+  "collection_name": "news_articles",
+  "description": "News article storage with dynamic fields",
+  "enable_dynamic_field": true,
+  "fields": [
+    {
+      "name": "article_id",
+      "type": "VarChar",
+      "max_length": 50,
+      "is_primary": true,
+      "description": "News article identifier"
+    },
+    {
+      "name": "headline",
+      "type": "VarChar",
+      "max_length": 300,
+      "description": "Article headline"
+    },
+    {
+      "name": "category",
+      "type": "VarChar",
+      "max_length": 50,
+      "is_partition_key": true,
+      "description": "News category for partitioning (politics, sports, tech, etc.)"
+    },
+    {
+      "name": "content_embedding",
+      "type": "FloatVector",
+      "dim": 768,
+      "description": "Article content embedding"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "collection_name": "document_search",
+  "description": "Document search with user-provided sparse vectors and BM25",
+  "enable_dynamic_field": true,
+  "fields": [
+    {
+      "name": "doc_id",
+      "type": "Int64",
+      "is_primary": true,
+      "description": "Document identifier"
+    },
+    {
+      "name": "title",
+      "type": "VarChar",
+      "max_length": 500,
+      "description": "Document title"
+    },
+    {
+      "name": "department_id",
+      "type": "Int64",
+      "min": 1,
+      "max": 50,
+      "is_partition_key": true,
+      "description": "Department ID for partitioning"
+    },
+    {
+      "name": "content_sparse_vector",
+      "type": "SparseFloatVector",
+      "description": "User-provided sparse vector for content (e.g., from SPLADE model)"
+    },
+    {
+      "name": "title_bm25_vector",
+      "type": "SparseFloatVector",
+      "description": "Auto-generated BM25 sparse vector for title"
+    },
+    {
+      "name": "semantic_vector",
+      "type": "FloatVector",
+      "dim": 768,
+      "description": "Document semantic embedding"
+    }
+  ],
+  "functions": [
+    {
+      "name": "title_to_bm25",
+      "type": "BM25",
+      "input_field_names": ["title"],
+      "output_field_names": ["title_bm25_vector"],
+      "params": {}
+    }
+  ]
+}
