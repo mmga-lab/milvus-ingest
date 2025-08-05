@@ -347,6 +347,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --shards ${params.shard_count} \\
                             --out ${outputPath} \\
                             --workers 8 \\
+                            --verbose \\
                             --force
                         
                         echo "Data generation completed. Checking output:"
