@@ -59,12 +59,12 @@ pipeline {
         string(
             description: 'QueryNode Nums',
             name: 'querynode_nums',
-            defaultValue: '3'
+            defaultValue: '1'
         )
         string(
             description: 'DataNode Nums',
             name: 'datanode_nums',
-            defaultValue: '3'
+            defaultValue: '1'
         )
         string(
             description: 'Proxy Nums',

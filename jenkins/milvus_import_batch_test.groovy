@@ -148,7 +148,7 @@ pipeline {
                                 echo "Configuration: schema=${scenario.schema}, files=${scenario.fileCount}x${scenario.fileSize}, format=${scenario.format}, storage=${scenario.storage}"
                                 
                                 try {
-                                    build job: 'milvus_import_stable_test', 
+                                    build job: 'import-stable-test', 
                                         parameters: [
                                             string(name: 'image_repository', value: params.image_repository),
                                             string(name: 'image_tag', value: params.image_tag),
