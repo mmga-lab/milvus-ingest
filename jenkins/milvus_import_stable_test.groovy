@@ -383,7 +383,8 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --uri ${milvusUri} \\
                             --drop-if-exists \\
                             --wait \\
-                            --timeout 4800
+                            --timeout 4800 \\
+                            --use-boto3
                         
                         echo "Import completed successfully"
                         """
