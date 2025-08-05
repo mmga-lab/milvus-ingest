@@ -69,7 +69,7 @@ pipeline {
     }
     
     stages {
-        stage('Prepare Test Scenarios') {
+        stage('Execute Test Scenarios') {
             steps {
                 script {
                     // Define all test scenarios
@@ -132,26 +132,20 @@ pipeline {
                         }
                     }
                     
-                    env.TEST_SCENARIOS = groovy.json.JsonOutput.toJson(allScenarios)
                     echo "Total test scenarios: ${allScenarios.size()}"
-                    echo "Test scenarios: ${env.TEST_SCENARIOS}"
-                }
-            }
-        }
-        
-        stage('Execute Test Scenarios') {
-            steps {
-                script {
-                    def scenarios = groovy.json.JsonSlurper().parseText(env.TEST_SCENARIOS)
+                    currentBuild.description = "Running ${allScenarios.size()} test scenarios"
+                    env.TOTAL_SCENARIOS = allScenarios.size().toString()
+                    
+                    // Now execute the tests
                     def parallelTests = [:]
                     
-                    scenarios.eachWithIndex { scenario, index ->
+                    allScenarios.eachWithIndex { scenario, index ->
                         def testName = "Test-${index + 1}: ${scenario.schema}-${scenario.fileDesc}-${scenario.format}-${scenario.storage}"
                         
                         parallelTests[testName] = {
                             stage(testName) {
                                 echo "Starting test: ${testName}"
-                                echo "Configuration: ${groovy.json.JsonOutput.toJson(scenario)}"
+                                echo "Configuration: schema=${scenario.schema}, files=${scenario.fileCount}x${scenario.fileSize}, format=${scenario.format}, storage=${scenario.storage}"
                                 
                                 try {
                                     build job: 'milvus_import_stable_test', 
@@ -208,7 +202,7 @@ pipeline {
                     sh """
                     mkdir -p ${env.ARTIFACTS}
                     echo "Test Summary:" > ${env.ARTIFACTS}/test_summary.txt
-                    echo "Total Scenarios: ${groovy.json.JsonSlurper().parseText(env.TEST_SCENARIOS).size()}" >> ${env.ARTIFACTS}/test_summary.txt
+                    echo "Total Scenarios: ${env.TOTAL_SCENARIOS}" >> ${env.ARTIFACTS}/test_summary.txt
                     echo "Parameters:" >> ${env.ARTIFACTS}/test_summary.txt
                     echo "  - Large Files: ${params.run_large_files}" >> ${env.ARTIFACTS}/test_summary.txt
                     echo "  - Small Files: ${params.run_small_files}" >> ${env.ARTIFACTS}/test_summary.txt
