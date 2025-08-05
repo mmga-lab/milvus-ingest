@@ -74,6 +74,7 @@ class S3Uploader:
         region_name: str = "us-east-1",
         verify_ssl: bool = True,
         use_aws_cli: bool = True,
+        use_mc_cli: bool = False,
     ):
         """Initialize S3 client.
 
@@ -84,11 +85,13 @@ class S3Uploader:
             region_name: AWS region name (default: us-east-1)
             verify_ssl: Whether to verify SSL certificates (default: True)
             use_aws_cli: Use AWS CLI subprocess instead of boto3 for uploads (more reliable, default: True)
+            use_mc_cli: Use MinIO Client (mc) CLI instead of AWS CLI or boto3 for uploads (default: False)
         """
         self.logger = get_logger(__name__)
 
         # Store configuration
         self.use_aws_cli = use_aws_cli
+        self.use_mc_cli = use_mc_cli
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
         self.region_name = region_name
@@ -100,8 +103,15 @@ class S3Uploader:
         if not self.secret_access_key:
             self.secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
 
-        # Check AWS CLI availability if requested
-        if self.use_aws_cli:
+        # Check CLI availability if requested
+        if self.use_mc_cli:
+            self._check_mc_cli_available()
+            # Generate a unique alias for this session
+            import uuid
+
+            self.mc_alias = f"milvus-ingest-{uuid.uuid4().hex[:8]}"
+            self._configure_mc_alias()
+        elif self.use_aws_cli:
             self._check_aws_cli_available()
 
         # Configure retry behavior for rate limiting
@@ -140,7 +150,9 @@ class S3Uploader:
                 extra={
                     "endpoint": endpoint_url or "AWS S3",
                     "region": self.region_name,
-                    "upload_method": "AWS CLI" if self.use_aws_cli else "boto3",
+                    "upload_method": "mc CLI"
+                    if self.use_mc_cli
+                    else ("AWS CLI" if self.use_aws_cli else "boto3"),
                 },
             )
         except Exception as e:
@@ -377,7 +389,9 @@ class S3Uploader:
         Returns:
             Dictionary with upload results including integrity validation
         """
-        if self.use_aws_cli:
+        if self.use_mc_cli:
+            return self._upload_file_with_mc(file_path, bucket, key, progress_callback)
+        elif self.use_aws_cli:
             return self._upload_file_with_cli(file_path, bucket, key, progress_callback)
         else:
             return self._upload_file_with_boto3(
@@ -932,6 +946,275 @@ class S3Uploader:
         except Exception as e:
             display_error(f"Failed to connect to S3: {e}")
             return False
+
+    def _check_mc_cli_available(self) -> None:
+        """Check if mc (MinIO Client) is available and install if missing."""
+        try:
+            # Check if mc command is available
+            result = subprocess.run(
+                ["mc", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"mc CLI not found or not working: {result.stderr}")
+
+            self.logger.info(f"mc CLI available: {result.stdout.strip()}")
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("mc CLI check timed out") from None
+        except FileNotFoundError:
+            # mc CLI not found, attempt to install it
+            self.logger.warning(
+                "mc CLI not found. Attempting to install automatically..."
+            )
+            if self._install_mc_cli():
+                # After successful installation, verify it works
+                self._check_mc_cli_available()
+            else:
+                raise RuntimeError(
+                    "mc CLI not found and automatic installation failed. "
+                    "Please install manually from https://min.io/docs/minio/linux/reference/minio-mc.html"
+                ) from None
+        except Exception as e:
+            raise RuntimeError(f"Failed to verify mc CLI: {e}") from e
+
+    def _install_mc_cli(self) -> bool:
+        """Attempt to install mc CLI automatically."""
+        try:
+            from .rich_display import display_info
+            import platform
+            import stat
+
+            display_info("🔧 Installing MinIO Client (mc)...")
+            self.logger.info("Attempting to install mc CLI...")
+
+            # Determine OS and architecture
+            system = platform.system().lower()
+            machine = platform.machine().lower()
+
+            # Map to mc download URL components
+            if system == "darwin":
+                os_name = "darwin"
+            elif system == "linux":
+                os_name = "linux"
+            elif system == "windows":
+                os_name = "windows"
+            else:
+                self.logger.error(f"Unsupported OS: {system}")
+                return False
+
+            # Map architecture
+            if machine in ["x86_64", "amd64"]:
+                arch = "amd64"
+            elif machine in ["aarch64", "arm64"]:
+                arch = "arm64"
+            else:
+                self.logger.error(f"Unsupported architecture: {machine}")
+                return False
+
+            # Download URL
+            mc_url = f"https://dl.min.io/client/mc/release/{os_name}-{arch}/mc"
+            if system == "windows":
+                mc_url += ".exe"
+
+            # Download to user's local bin directory
+            home = Path.home()
+            local_bin = home / ".local" / "bin"
+            local_bin.mkdir(parents=True, exist_ok=True)
+
+            mc_path = local_bin / ("mc.exe" if system == "windows" else "mc")
+
+            self.logger.info(f"Downloading mc from {mc_url} to {mc_path}")
+
+            # Download mc binary
+            import urllib.request
+
+            try:
+                urllib.request.urlretrieve(mc_url, str(mc_path))
+            except Exception as e:
+                self.logger.error(f"Failed to download mc: {e}")
+                return False
+
+            # Make executable on Unix-like systems
+            if system != "windows":
+                mc_path.chmod(mc_path.stat().st_mode | stat.S_IEXEC)
+
+            # Check if local bin is in PATH
+            current_path = os.environ.get("PATH", "")
+            if str(local_bin) not in current_path:
+                # Add to current session PATH
+                os.environ["PATH"] = f"{local_bin}{os.pathsep}{current_path}"
+
+                # Provide user guidance
+                display_info(
+                    f"⚠️  mc CLI installed to {local_bin}\n"
+                    f"   Add this to your PATH for future sessions:\n"
+                    f'   export PATH="{local_bin}:$PATH"'
+                )
+                self.logger.info(f"Added {local_bin} to current session PATH")
+
+            self.logger.info("✅ mc CLI installed successfully")
+            display_info("✅ mc CLI installed successfully")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to install mc CLI: {e}")
+            return False
+
+    def _configure_mc_alias(self) -> None:
+        """Configure mc alias for the S3/MinIO endpoint."""
+        try:
+            # Build mc alias set command
+            cmd = ["mc", "alias", "set", self.mc_alias]
+
+            # Add endpoint URL
+            if self.endpoint_url:
+                cmd.append(self.endpoint_url)
+            else:
+                # Default to AWS S3
+                cmd.append("https://s3.amazonaws.com")
+
+            # Add access key and secret key
+            if self.access_key_id:
+                cmd.append(self.access_key_id)
+            else:
+                cmd.append("")  # Empty string for public access
+
+            if self.secret_access_key:
+                cmd.append(self.secret_access_key)
+            else:
+                cmd.append("")  # Empty string for public access
+
+            # Execute the command
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to configure mc alias: {result.stderr}")
+
+            self.logger.info(f"mc alias '{self.mc_alias}' configured successfully")
+
+        except Exception as e:
+            self.logger.error(f"Failed to configure mc alias: {e}")
+            raise
+
+    def _upload_file_with_mc(
+        self,
+        file_path: Path,
+        bucket: str,
+        key: str,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> dict[str, Any]:
+        """Upload a single file to S3 using mc CLI.
+
+        Args:
+            file_path: Local file path to upload
+            bucket: S3 bucket name
+            key: S3 object key
+            progress_callback: Optional callback function for progress updates
+
+        Returns:
+            Dictionary with upload results including integrity validation
+        """
+        result = {
+            "success": False,
+            "file_path": str(file_path),
+            "s3_key": key,
+            "local_size": 0,
+            "remote_size": 0,
+            "local_etag": None,
+            "remote_etag": None,
+            "integrity_valid": False,
+        }
+
+        try:
+            # Get local file information
+            file_size = file_path.stat().st_size
+            result["local_size"] = file_size
+
+            # Build mc command
+            # mc cp <local_file> <alias>/<bucket>/<key>
+            mc_target = f"{self.mc_alias}/{bucket}/{key}"
+            cmd = ["mc", "cp", str(file_path), mc_target]
+
+            # Add SSL verification settings
+            if not self.verify_ssl:
+                cmd.append("--insecure")
+
+            self.logger.info(f"Starting mc upload: {file_path.name} -> {mc_target}")
+
+            # Execute mc command
+            result_proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=None,  # No timeout for large files
+            )
+
+            if result_proc.returncode != 0:
+                error_msg = (
+                    result_proc.stderr.strip()
+                    if result_proc.stderr
+                    else "Unknown error"
+                )
+                self.logger.error(f"mc upload failed: {error_msg}")
+                raise RuntimeError(f"mc upload failed: {error_msg}")
+
+            self.logger.info(f"mc upload completed: {file_path.name}")
+
+            # Verify upload integrity using boto3 (same as before)
+            # Calculate local ETag for verification
+            if file_size < 1024 * 1024 * 1024:  # < 1GB
+                result["local_etag"] = self._calculate_file_md5(file_path)
+            else:
+                # For large files, we'll skip ETag calculation since mc
+                # uses its own multipart strategy
+                result["local_etag"] = None
+
+            integrity_check = self._verify_upload_integrity(bucket, key, result)
+            result.update(integrity_check)
+
+            if result["integrity_valid"]:
+                self.logger.debug(f"✅ mc upload verified: {file_path} -> {mc_target}")
+                result["success"] = True
+            else:
+                self.logger.error(f"❌ mc upload integrity check failed: {file_path}")
+                # Clean up failed upload
+                try:
+                    self.s3_client.delete_object(Bucket=bucket, Key=key)
+                    self.logger.info(f"Cleaned up failed upload: {mc_target}")
+                except Exception as cleanup_error:
+                    self.logger.warning(
+                        f"Failed to clean up failed upload: {cleanup_error}"
+                    )
+                raise ValueError(f"Upload integrity validation failed for {file_path}")
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"mc upload timed out for {file_path}") from None
+        except Exception as e:
+            self.logger.error(f"Failed to upload {file_path} with mc: {e}")
+            raise
+
+        return result
+
+    def __del__(self):
+        """Clean up mc alias on deletion."""
+        if hasattr(self, "mc_alias"):
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                # Remove the temporary alias
+                subprocess.run(
+                    ["mc", "alias", "remove", self.mc_alias],
+                    capture_output=True,
+                    timeout=5,
+                )
 
 
 def parse_s3_url(url: str) -> tuple[str, str]:
