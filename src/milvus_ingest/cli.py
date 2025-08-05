@@ -202,6 +202,12 @@ def main(ctx: click.Context, verbose: bool = False) -> None:
     is_flag=True,
     help="Force regeneration even if cached data exists (will update cache with new data).",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging output.",
+)
 @click.pass_context
 def generate(
     ctx: click.Context,
@@ -226,6 +232,7 @@ def generate(
     chunk_size: str = "512MB",
     use_cache: bool = False,
     force_regenerate: bool = False,
+    verbose: bool = False,
 ) -> None:
     """Generate high-performance mock data from schema using optimized vectorized operations.
 

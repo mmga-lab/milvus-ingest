@@ -794,7 +794,9 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
         pk_offset = file_info["pk_offset"]
         output_dir = Path(file_info["output_dir"])
         format = file_info["format"]
+        batch_size = file_info["batch_size"]
         seed = file_info["seed"]
+        
         num_partitions = file_info.get("num_partitions")
 
         # Set process-specific seed to ensure different random data per process
@@ -835,6 +837,16 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
 
         # Generate data
         data: dict[str, Any] = {}
+        
+        # Calculate chunks for progress tracking
+        chunk_size = batch_size
+        total_chunks = (current_batch_rows + chunk_size - 1) // chunk_size
+        
+        # Log initial progress
+        logger.warning(
+            f"📊 File {file_index + 1}/{total_files}: starting generation "
+            f"({current_batch_rows:,} rows in {total_chunks} chunks)"
+        )
 
         # Generate partition key with enough unique values (if partition key exists)
         if partition_key_field and num_partitions:
@@ -849,6 +861,7 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
             data[partition_key_field["name"]] = partition_values
 
         # Generate remaining scalar fields efficiently
+        logger.warning(f"📊 File {file_index + 1}/{total_files}: generating scalar fields")
         for field in scalar_fields:
             field_name = field["name"]
             field_type = field["type"]
@@ -1160,6 +1173,9 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
 
         batch_generation_time = time.time() - generation_start
 
+        # Log progress before writing
+        logger.warning(f"📊 File {file_index + 1}/{total_files}: writing to file")
+
         # Create DataFrame
         df = pd.DataFrame(data)
 
@@ -1202,8 +1218,72 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
                     output_dir / f"data-{file_num:05d}-of-{total_files:05d}.parquet"
                 )
 
-            # Convert to PyArrow table for efficient writing
-            table = pa.Table.from_pandas(df)
+            # Create explicit PyArrow schema to ensure consistency across chunks
+            pa_schema_fields = []
+            for field in fields:
+                field_name = field["name"]
+                field_type = field["type"]
+                is_nullable = field.get("nullable", False)
+                
+                # Skip fields not in DataFrame (e.g., sparse vectors handled separately)
+                if field_name not in df.columns:
+                    continue
+                
+                # Map Milvus types to PyArrow types
+                if field_type == "Int8":
+                    pa_type = pa.int8()
+                elif field_type == "Int16":
+                    pa_type = pa.int16()
+                elif field_type == "Int32":
+                    pa_type = pa.int32()
+                elif field_type == "Int64":
+                    pa_type = pa.int64()
+                elif field_type == "Float":
+                    pa_type = pa.float32()
+                elif field_type == "Double":
+                    pa_type = pa.float64()
+                elif field_type == "Bool":
+                    pa_type = pa.bool_()
+                elif field_type in ["VarChar", "String"]:
+                    pa_type = pa.string()
+                elif field_type == "JSON":
+                    pa_type = pa.string()  # JSON stored as string in Parquet
+                elif field_type == "Array":
+                    element_type = field.get("element_type", "VarChar")
+                    if element_type in ["VarChar", "String"]:
+                        pa_type = pa.list_(pa.string())
+                    elif element_type == "Int32":
+                        pa_type = pa.list_(pa.int32())
+                    elif element_type == "Int64":
+                        pa_type = pa.list_(pa.int64())
+                    elif element_type == "Float":
+                        pa_type = pa.list_(pa.float32())
+                    elif element_type == "Double":
+                        pa_type = pa.list_(pa.float64())
+                    else:
+                        pa_type = pa.list_(pa.string())
+                elif field_type == "FloatVector":
+                    pa_type = pa.list_(pa.float32())
+                elif field_type in ["Float16Vector", "BFloat16Vector"]:
+                    pa_type = pa.list_(pa.uint8())  # These are stored as uint8 arrays
+                elif field_type == "BinaryVector":
+                    pa_type = pa.list_(pa.uint8())
+                else:
+                    # Default to string for unknown types
+                    pa_type = pa.string()
+                
+                # Add field to schema
+                pa_schema_fields.append(pa.field(field_name, pa_type, nullable=is_nullable))
+            
+            # Add dynamic field if present
+            if "$meta" in df.columns:
+                pa_schema_fields.append(pa.field("$meta", pa.string(), nullable=True))
+            
+            # Create PyArrow schema
+            pa_schema = pa.schema(pa_schema_fields)
+            
+            # Convert to PyArrow table with explicit schema
+            table = pa.Table.from_pandas(df, schema=pa_schema)
 
             # Write with optimized settings
             pq.write_table(
@@ -1327,6 +1407,7 @@ def _generate_files_parallel(
     rows: int,
     output_dir: Path,
     format: str,
+    batch_size: int,
     seed: int | None,
     num_partitions: int | None,
     num_shards: int | None,
@@ -1367,6 +1448,7 @@ def _generate_files_parallel(
             "pk_offset": pk_offset,
             "output_dir": str(output_dir),
             "format": format,
+            "batch_size": batch_size,
             "seed": seed,
             "num_partitions": num_partitions,
             "num_shards": num_shards,
@@ -2773,6 +2855,7 @@ def generate_data_optimized(
             rows=rows,
             output_dir=output_dir,
             format=format,
+            batch_size=batch_size,
             seed=seed,
             num_partitions=num_partitions,
             num_shards=num_shards,
@@ -3204,8 +3287,72 @@ def generate_data_optimized(
                     output_dir / f"data-{file_num:05d}-of-{total_files:05d}.parquet"
                 )
 
-            # Convert to PyArrow table for efficient writing
-            table = pa.Table.from_pandas(df)
+            # Create explicit PyArrow schema to ensure consistency across chunks
+            pa_schema_fields = []
+            for field in fields:
+                field_name = field["name"]
+                field_type = field["type"]
+                is_nullable = field.get("nullable", False)
+                
+                # Skip fields not in DataFrame (e.g., sparse vectors handled separately)
+                if field_name not in df.columns:
+                    continue
+                
+                # Map Milvus types to PyArrow types
+                if field_type == "Int8":
+                    pa_type = pa.int8()
+                elif field_type == "Int16":
+                    pa_type = pa.int16()
+                elif field_type == "Int32":
+                    pa_type = pa.int32()
+                elif field_type == "Int64":
+                    pa_type = pa.int64()
+                elif field_type == "Float":
+                    pa_type = pa.float32()
+                elif field_type == "Double":
+                    pa_type = pa.float64()
+                elif field_type == "Bool":
+                    pa_type = pa.bool_()
+                elif field_type in ["VarChar", "String"]:
+                    pa_type = pa.string()
+                elif field_type == "JSON":
+                    pa_type = pa.string()  # JSON stored as string in Parquet
+                elif field_type == "Array":
+                    element_type = field.get("element_type", "VarChar")
+                    if element_type in ["VarChar", "String"]:
+                        pa_type = pa.list_(pa.string())
+                    elif element_type == "Int32":
+                        pa_type = pa.list_(pa.int32())
+                    elif element_type == "Int64":
+                        pa_type = pa.list_(pa.int64())
+                    elif element_type == "Float":
+                        pa_type = pa.list_(pa.float32())
+                    elif element_type == "Double":
+                        pa_type = pa.list_(pa.float64())
+                    else:
+                        pa_type = pa.list_(pa.string())
+                elif field_type == "FloatVector":
+                    pa_type = pa.list_(pa.float32())
+                elif field_type in ["Float16Vector", "BFloat16Vector"]:
+                    pa_type = pa.list_(pa.uint8())  # These are stored as uint8 arrays
+                elif field_type == "BinaryVector":
+                    pa_type = pa.list_(pa.uint8())
+                else:
+                    # Default to string for unknown types
+                    pa_type = pa.string()
+                
+                # Add field to schema
+                pa_schema_fields.append(pa.field(field_name, pa_type, nullable=is_nullable))
+            
+            # Add dynamic field if present
+            if "$meta" in df.columns:
+                pa_schema_fields.append(pa.field("$meta", pa.string(), nullable=True))
+            
+            # Create PyArrow schema
+            pa_schema = pa.schema(pa_schema_fields)
+            
+            # Convert to PyArrow table with explicit schema
+            table = pa.Table.from_pandas(df, schema=pa_schema)
 
             # Write with optimized settings
             pq.write_table(
