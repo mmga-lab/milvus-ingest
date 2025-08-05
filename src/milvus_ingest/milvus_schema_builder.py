@@ -253,16 +253,62 @@ class MilvusSchemaBuilder:
                 metadata, use_flat_index
             )
 
+            # Prepare collection creation parameters
+            create_params = {
+                "collection_name": collection_name,
+                "schema": schema,
+                "index_params": index_params,
+            }
+            
+            # Add collection configuration parameters if specified
+            collection_config = metadata.get("collection_config", {})
+            
+            # Add num_shards if specified
+            if "num_shards" in collection_config:
+                create_params["num_shards"] = collection_config["num_shards"]
+                self.logger.info(f"Creating collection with {collection_config['num_shards']} shards")
+            
+            # Add num_partitions if specified
+            if "num_partitions" in collection_config:
+                create_params["num_partitions"] = collection_config["num_partitions"]
+                partition_key_field = collection_config.get("partition_key_field", "unknown")
+                self.logger.info(f"Creating collection with {collection_config['num_partitions']} partitions using key '{partition_key_field}'")
+            
             # Create collection
-            self.client.create_collection(
-                collection_name=collection_name,
-                schema=schema,
-                index_params=index_params,
-            )
+            self.client.create_collection(**create_params)
             self.logger.info(f"Created collection: {collection_name}")
+            
+            # Print collection details for verification
+            self._print_collection_details(collection_name)
             return True
 
         return False
+
+    def _print_collection_details(self, collection_name: str) -> None:
+        """Print collection schema details from describe_collection for verification."""
+        try:
+            # Get collection description from Milvus
+            collection_info = self.client.describe_collection(collection_name)
+            
+            self.logger.info("=" * 60)
+            self.logger.info(f"Milvus Collection Schema: {collection_name}")
+            self.logger.info("=" * 60)
+            
+            # Print the raw collection info as returned by Milvus
+            import json
+            if hasattr(collection_info, '__dict__'):
+                # Convert object to dict if needed
+                info_dict = vars(collection_info)
+                self.logger.info(f"Collection Description:\n{json.dumps(info_dict, indent=2, default=str)}")
+            elif isinstance(collection_info, dict):
+                self.logger.info(f"Collection Description:\n{json.dumps(collection_info, indent=2, default=str)}")
+            else:
+                self.logger.info(f"Collection Description: {collection_info}")
+            
+            self.logger.info("=" * 60)
+            
+        except Exception as e:
+            self.logger.warning(f"Could not retrieve collection details: {e}")
 
     def get_index_info_from_metadata(
         self,
