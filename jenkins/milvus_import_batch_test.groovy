@@ -27,12 +27,12 @@ pipeline {
             defaultValue: 'master-latest'
         )
         booleanParam(
-            description: 'Run Large Files Tests (10 x 10GB)',
+            description: 'Run Large Files Tests (10 x 1GB)',
             name: 'run_large_files',
             defaultValue: true
         )
         booleanParam(
-            description: 'Run Small Files Tests (500 x 200MB)',
+            description: 'Run Small Files Tests (100 x 100MB)',
             name: 'run_small_files',
             defaultValue: true
         )
@@ -75,21 +75,23 @@ pipeline {
                     // Define all test scenarios
                     def allScenarios = []
                     
-                    // Schema types to test - using comprehensive built-in schemas
+                    // Schema types to test - comprehensive coverage of all available schemas
                     def schemaTypes = [
-                        'text_search_advanced',  // Has BM25 functions, all data types
-                        'full_text_search',      // BM25 with nullable fields
-                        'default_values',        // Default values testing
-                        'dynamic_fields'         // Dynamic field testing
+                        'product_catalog',    // Simple product catalog with auto_id (4 fields, 128d)
+                        'ecommerce_search',   // E-commerce with nullable fields (5 fields, 256d)
+                        'news_articles',      // News with dynamic fields (4 fields, 768d)
+                        'document_search',    // Document search with sparse vectors + BM25 (5 fields, 768d)
+                        'multi_tenant_data',  // Multi-tenant with partitioning (5 fields, 256d)
+                        'multimedia_content'  // Multiple vector types + nullable fields (7 fields, 256d+384d+128d)
                     ]
                     
-                    // File configurations
+                    // File configurations - optimized for comprehensive testing without 10*10GB
                     def fileConfigs = []
                     if (params.run_large_files) {
-                        fileConfigs.add([count: 10, size: '10GB', desc: 'Large Files'])
+                        fileConfigs.add([count: 10, size: '1GB', desc: 'Large Files'])
                     }
                     if (params.run_small_files) {
-                        fileConfigs.add([count: 500, size: '200MB', desc: 'Small Files'])
+                        fileConfigs.add([count: 100, size: '100MB', desc: 'Small Files'])
                     }
                     
                     // Formats

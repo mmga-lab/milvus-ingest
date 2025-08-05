@@ -13,173 +13,53 @@ SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
 # Schema metadata
 BUILTIN_SCHEMAS = {
-    "quickstart": {
-        "name": "Quick Start",
-        "description": "Basic schema for getting started with essential fields (uses auto_id=true)",
-        "use_cases": ["Learning", "Testing", "Quick start", "Auto ID demonstration"],
-        "fields_count": 6,
-        "vector_dims": [128],
-        "file": "quickstart.json",
-    },
-    "dynamic_fields": {
-        "name": "Dynamic Fields",
-        "description": "Schema demonstrating dynamic field capabilities with VarChar auto_id for flexible data insertion",
-        "use_cases": [
-            "Dynamic data",
-            "Schema evolution",
-            "Flexible fields",
-            "VarChar auto ID demonstration",
-        ],
+    "product_catalog": {
+        "name": "Product Catalog",
+        "description": "Simple product catalog for getting started with auto_id",
+        "use_cases": ["Learning", "Basic product search", "Auto ID demonstration"],
         "fields_count": 4,
-        "vector_dims": [384],
-        "file": "dynamic_fields.json",
-    },
-    "ecommerce": {
-        "name": "E-commerce Products",
-        "description": "Product catalog with multiple embeddings for search and recommendation",
-        "use_cases": ["Product search", "Recommendation systems", "Catalog management"],
-        "fields_count": 12,
-        "vector_dims": [768, 512],
-        "file": "ecommerce.json",
-    },
-    "documents": {
-        "name": "Document Search",
-        "description": "Document collection with semantic search capabilities",
-        "use_cases": ["Document search", "Knowledge base", "Content management"],
-        "fields_count": 12,
-        "vector_dims": [1536],
-        "file": "documents.json",
-    },
-    "images": {
-        "name": "Image Gallery",
-        "description": "Image collection with visual similarity search",
-        "use_cases": ["Image search", "Visual similarity", "Photo management"],
-        "fields_count": 14,
-        "vector_dims": [2048, 512],
-        "file": "images.json",
-    },
-    "users": {
-        "name": "User Profiles",
-        "description": "User profiles with behavioral embeddings for recommendation",
-        "use_cases": ["User recommendation", "Personalization", "Customer analytics"],
-        "fields_count": 15,
-        "vector_dims": [256],
-        "file": "users.json",
-    },
-    "videos": {
-        "name": "Video Library",
-        "description": "Video content with multimodal embeddings",
-        "use_cases": ["Video search", "Content recommendation", "Media management"],
-        "fields_count": 18,
-        "vector_dims": [512, 1024],
-        "file": "videos.json",
-    },
-    "news": {
-        "name": "News Articles",
-        "description": "News articles with semantic search and sentiment analysis",
-        "use_cases": ["News search", "Content analysis", "Media monitoring"],
-        "fields_count": 19,
-        "vector_dims": [384, 768],
-        "file": "news.json",
-    },
-    "ecommerce_partitioned": {
-        "name": "E-commerce Multi-tenant",
-        "description": "Multi-tenant e-commerce catalog with partition key for tenant isolation",
-        "use_cases": [
-            "Multi-tenant SaaS",
-            "Partitioned product search",
-            "Tenant data isolation",
-        ],
-        "fields_count": 13,
-        "vector_dims": [768],
-        "file": "ecommerce_partitioned.json",
-    },
-    "data_distribution": {
-        "name": "Data Distribution",
-        "description": "Schema showcasing different data distribution patterns using cardinality_ratio and enum_values",
-        "use_cases": [
-            "Data distribution testing",
-            "Performance benchmarking",
-            "Schema design patterns",
-        ],
-        "fields_count": 10,
         "vector_dims": [128],
-        "file": "data_distribution.json",
+        "file": "product_catalog.json",
     },
-    "audio_transcripts": {
-        "name": "Audio Transcripts",
-        "description": "Audio transcription service with semantic search using Float16Vector embeddings",
-        "use_cases": [
-            "Speech-to-text search",
-            "Podcast transcription",
-            "Meeting recordings",
-        ],
-        "fields_count": 10,
+    "ecommerce_search": {
+        "name": "E-commerce Search",
+        "description": "E-commerce product search with nullable fields",
+        "use_cases": ["Product search", "E-commerce", "Nullable field handling"],
+        "fields_count": 5,
+        "vector_dims": [256],
+        "file": "ecommerce_search.json",
+    },
+    "news_articles": {
+        "name": "News Articles",
+        "description": "News article storage with dynamic fields",
+        "use_cases": ["News search", "Dynamic schema", "Content management"],
+        "fields_count": 4,
         "vector_dims": [768],
-        "file": "audio_transcripts.json",
+        "file": "news_articles.json",
     },
-    "ai_conversations": {
-        "name": "AI Conversations",
-        "description": "AI chat conversation history with BFloat16Vector embeddings for semantic search",
-        "use_cases": [
-            "Chatbot analytics",
-            "Conversation search",
-            "AI interaction history",
-        ],
-        "fields_count": 13,
-        "vector_dims": [1024],
-        "file": "ai_conversations.json",
-    },
-    "face_recognition": {
-        "name": "Face Recognition",
-        "description": "Facial recognition system with BinaryVector for efficient biometric matching",
-        "use_cases": [
-            "Security systems",
-            "Identity verification",
-            "Access control",
-        ],
-        "fields_count": 14,
-        "vector_dims": [512, 256],
-        "file": "face_recognition.json",
-    },
-    "default_values": {
-        "name": "Default Values",
-        "description": "Schema with default_value field parameters for handling missing data during insertion",
-        "use_cases": [
-            "Data migration with missing values",
-            "Flexible data insertion",
-            "Schema with fallback values",
-        ],
-        "fields_count": 9,
+    "document_search": {
+        "name": "Document Search",
+        "description": "Document search with user-provided sparse vectors and BM25",
+        "use_cases": ["Sparse vector search", "BM25 functions", "Hybrid search"],
+        "fields_count": 5,
         "vector_dims": [768],
-        "file": "default_values.json",
+        "file": "document_search.json",
     },
-    "full_text_search": {
-        "name": "Full-Text Search",
-        "description": "Full-text search with BM25 function and semantic embeddings for hybrid search",
-        "use_cases": [
-            "Full-text search",
-            "Hybrid search (BM25 + semantic)",
-            "Document retrieval",
-            "Keyword search",
-        ],
-        "fields_count": 11,
-        "vector_dims": [768],
-        "file": "full_text_search.json",
+    "multi_tenant_data": {
+        "name": "Multi-tenant Support",
+        "description": "Multi-tenant customer support system with partitioning",
+        "use_cases": ["Multi-tenant SaaS", "Partition keys", "Support tickets"],
+        "fields_count": 5,
+        "vector_dims": [256],
+        "file": "multi_tenant_data.json",
     },
-    "text_search_advanced": {
-        "name": "Advanced Text Search",
-        "description": "Comprehensive BM25 functions with multiple text fields for advanced full-text search",
-        "use_cases": [
-            "Advanced BM25 search",
-            "Multi-field full-text search",
-            "Hybrid search systems",
-            "Advanced text retrieval",
-            "Search relevance optimization",
-        ],
-        "fields_count": 17,
-        "vector_dims": [768],
-        "file": "text_search_advanced.json",
+    "multimedia_content": {
+        "name": "Multimedia Gallery",
+        "description": "Multimedia content with multiple vector types and nullable fields",
+        "use_cases": ["Media search", "Multiple vector types", "Default values"],
+        "fields_count": 7,
+        "vector_dims": [256, 384, 128],
+        "file": "multimedia_content.json",
     },
 }
 
@@ -276,11 +156,9 @@ def get_schema_summary() -> str:
         summary += "**Usage:**\n"
         summary += "```bash\n"
         summary += "# Use built-in schema\n"
-        summary += f"milvus-ingest --builtin {schema_id} --rows 1000\n\n"
+        summary += f"milvus-ingest generate --builtin {schema_id} --total-rows 1000\n\n"
         summary += "# Save schema to file for customization\n"
-        summary += (
-            f"milvus-ingest --builtin {schema_id} --save-schema my_{schema_id}.json\n"
-        )
+        summary += f"milvus-ingest schema show {schema_id} > my_{schema_id}.json\n"
         summary += "```\n\n"
         summary += "---\n\n"
 

@@ -29,7 +29,6 @@ from typing import Any
 
 import click
 
-from .cache_manager import CacheManager
 from .logging_config import (
     get_logger,
     log_error_with_context,
@@ -151,14 +150,6 @@ def main(ctx: click.Context, verbose: bool = False) -> None:
     help="File size limit. Can be exact size ('10GB', '200MB') or max size in MB (e.g., '256'). Default: 256MB.",
 )
 @click.option(
-    "--rows-per-file",
-    "rows_per_file",
-    default=1000000,
-    show_default=True,
-    type=int,
-    help="Maximum rows per file (for automatic file partitioning).",
-)
-@click.option(
     "--file-count",
     "file_count",
     type=int,
@@ -183,26 +174,6 @@ def main(ctx: click.Context, verbose: bool = False) -> None:
     help="Number of parallel worker processes for file generation. Default: CPU count.",
 )
 @click.option(
-    "--chunk-and-merge",
-    is_flag=True,
-    help="Generate smaller chunks in parallel then merge. Auto-enabled for files >=2GB. Improves performance for large single files.",
-)
-@click.option(
-    "--chunk-size",
-    default="512MB",
-    help="Size of each chunk when using --chunk-and-merge (e.g., '512MB', '1GB'). Default: 512MB.",
-)
-@click.option(
-    "--use-cache",
-    is_flag=True,
-    help="Enable caching to reuse previously generated data with identical parameters.",
-)
-@click.option(
-    "--force-regenerate",
-    is_flag=True,
-    help="Force regeneration even if cached data exists (will update cache with new data).",
-)
-@click.option(
     "--verbose",
     "-v",
     is_flag=True,
@@ -223,15 +194,10 @@ def generate(
     batch_size: int = 50000,
     force: bool = False,
     file_size: str | None = None,
-    rows_per_file: int = 1000000,
     file_count: int | None = None,
     num_partitions: int | None = None,
     num_shards: int | None = None,
     num_workers: int | None = None,
-    chunk_and_merge: bool = False,
-    chunk_size: str = "512MB",
-    use_cache: bool = False,
-    force_regenerate: bool = False,
     verbose: bool = False,
 ) -> None:
     """Generate high-performance mock data from schema using optimized vectorized operations.
@@ -492,7 +458,6 @@ def generate(
                         num_partitions=num_partitions,
                         num_shards=num_shards,
                         seed=seed,
-                        rows_per_file=preview_rows,
                         file_size=None,  # Don't use size controls for preview
                         file_count=None,
                         skip_validation=True,  # Skip validation for preview
@@ -595,67 +560,6 @@ def generate(
         shutil.rmtree(output_path)
         logger.debug("Output directory removed successfully")
 
-    # Cache functionality
-    if use_cache or force_regenerate:
-        # Validate cache parameter combinations
-        if use_cache and force_regenerate:
-            click.echo(
-                "Cannot use --use-cache and --force-regenerate together", err=True
-            )
-            raise SystemExit(1)
-
-        cache_manager = CacheManager()
-
-        # Prepare generation parameters for cache key
-        generation_params = {
-            "total_rows": total_rows,
-            "seed": seed,
-            "format": output_format,
-            "batch_size": batch_size,
-            "file_size": file_size,
-            "rows_per_file": rows_per_file,
-            "file_count": file_count,
-            "num_partitions": num_partitions,
-            "num_shards": num_shards,
-            "num_workers": num_workers,
-        }
-
-        cache_key = cache_manager.generate_cache_key(schema_path, generation_params)
-        logger.debug(f"Generated cache key: {cache_key}")
-
-        # Check if cache exists and is valid
-        if use_cache and cache_manager.cache_exists(cache_key):
-            click.echo(f"✓ Found cached data (key: {cache_key[:12]}...)")
-            click.echo("Retrieving cached files...")
-
-            success, copied_files, meta_data = cache_manager.retrieve_cache(
-                cache_key, output_path
-            )
-            if success and copied_files:
-                click.echo(
-                    f"✓ Successfully retrieved {len(copied_files)} cached files to {output_path.resolve()}"
-                )
-
-                # Log the cached result
-                total_size = sum(
-                    f.stat().st_size for f in output_path.rglob("*") if f.is_file()
-                )
-                file_size_mb = total_size / (1024 * 1024)
-
-                logger.info(
-                    "Cache retrieval completed successfully",
-                    cache_key=cache_key,
-                    rows=total_rows,
-                    output_file=str(output_path),
-                    file_size_mb=file_size_mb,
-                )
-                return
-            else:
-                click.echo(
-                    "✗ Failed to retrieve cached data, falling back to generation"
-                )
-                logger.warning(f"Cache retrieval failed for key {cache_key}")
-
     # Handle file-count + file-size parameter conflict
     # When both are specified, total_rows should be calculated by the generator
     effective_total_rows = total_rows
@@ -691,14 +595,11 @@ def generate(
             seed=seed,
             show_progress=not no_progress,
             file_size=file_size,
-            rows_per_file=rows_per_file,
             num_partitions=num_partitions,
             num_shards=num_shards,
             file_count=file_count,
             num_workers=num_workers,
             verbose=verbose,
-            chunk_and_merge=chunk_and_merge,
-            chunk_size=chunk_size,
         )
         # Calculate directory size for logging (output is always a directory now)
         total_size = sum(
@@ -712,39 +613,6 @@ def generate(
             output_file=str(output_path),
             file_size_mb=file_size_mb,
         )
-
-        # Store in cache if cache functionality is enabled
-        if (
-            (use_cache or force_regenerate)
-            and "cache_manager" in locals()
-            and "cache_key" in locals()
-        ):
-            click.echo("Storing generated data in cache...")
-
-            # Find all generated data files (excluding meta.json)
-            data_files = []
-            for pattern in ["*.parquet", "*.json"]:
-                for file_path in output_path.glob(pattern):
-                    if file_path.name != "meta.json":
-                        data_files.append(str(file_path))
-
-            meta_file = output_path / "meta.json"
-            if data_files and meta_file.exists():
-                success = cache_manager.store_cache(
-                    cache_key=cache_key,
-                    generated_files=data_files,
-                    meta_file=meta_file,
-                    generation_params=generation_params,
-                )
-
-                if success:
-                    click.echo(f"✓ Data cached successfully (key: {cache_key[:12]}...)")
-                    logger.info(f"Generated data cached with key: {cache_key}")
-                else:
-                    click.echo("✗ Failed to cache generated data")
-                    logger.warning(f"Failed to cache data with key: {cache_key}")
-            else:
-                logger.warning("No data files or meta.json found for caching")
 
         # Output is always a directory now
         click.echo(
@@ -917,288 +785,6 @@ def clean(yes: bool = False) -> None:
     """Clean up generated output files."""
     logger = get_logger(__name__)
     _handle_clean_command(yes, logger)
-
-
-@main.group()
-def cache() -> None:
-    """Manage generation cache."""
-    pass
-
-
-@cache.command("list")
-def list_caches() -> None:
-    """List all cached datasets."""
-    cache_manager = CacheManager()
-    caches = cache_manager.list_caches()
-
-    if not caches:
-        click.echo("No cached datasets found.")
-        return
-
-    from rich.console import Console
-    from rich.table import Table
-
-    console = Console()
-
-    # Create table for cache list
-    table = Table(
-        title="Cached Datasets", show_header=True, header_style="bold magenta"
-    )
-    table.add_column("Cache Key", style="cyan", no_wrap=True, width=16)
-    table.add_column("Created", style="green")
-    table.add_column("Rows", justify="right", style="yellow")
-    table.add_column("Files", justify="right", style="blue")
-    table.add_column("Size", justify="right", style="red")
-    table.add_column("Schema", style="white")
-
-    for cache_info in caches:
-        cache_key = cache_info.get("cache_key", "unknown")
-        created_at = cache_info.get("created_at_iso", "unknown")
-
-        # Get generation info
-        gen_params = cache_info.get("generation_params", {})
-        total_rows = gen_params.get("total_rows", 0)
-        data_files = cache_info.get("data_files", [])
-        size_mb = cache_info.get("size_mb", 0)
-
-        # Try to extract schema name from schema content
-        schema_content = gen_params.get("schema_content", "")
-        schema_name = "unknown"
-        if schema_content:
-            try:
-                schema_data = json.loads(schema_content)
-                schema_name = schema_data.get(
-                    "collection_name", schema_data.get("name", "unknown")
-                )
-            except:
-                pass
-
-        table.add_row(
-            cache_key[:12] + "...",
-            created_at,
-            f"{total_rows:,}",
-            str(len(data_files)),
-            f"{size_mb:.1f} MB",
-            schema_name,
-        )
-
-    console.print(table)
-
-    # Show summary
-    stats = cache_manager.get_cache_stats()
-    console.print(
-        f"\nTotal: {stats['total_caches']} cached datasets, {stats['total_size_mb']:.1f} MB"
-    )
-
-
-@cache.command("info")
-@click.argument("cache_key")
-def cache_info(cache_key: str) -> None:
-    """Show detailed information about a specific cache."""
-    cache_manager = CacheManager()
-
-    # Support partial cache key matching
-    if len(cache_key) < 64:  # Partial key
-        all_caches = cache_manager.list_caches()
-        matching_caches = [
-            c for c in all_caches if c.get("cache_key", "").startswith(cache_key)
-        ]
-
-        if not matching_caches:
-            display_error(f"No cache found with key starting with: {cache_key}")
-            return
-        elif len(matching_caches) > 1:
-            click.echo(f"Multiple caches match '{cache_key}':")
-            for cache in matching_caches:
-                click.echo(f"  - {cache.get('cache_key', 'unknown')}")
-            return
-        else:
-            cache_key = matching_caches[0].get("cache_key", cache_key)
-
-    cache_info = cache_manager.get_cache_info(cache_key)
-    if not cache_info:
-        display_error(f"Cache not found: {cache_key}")
-        return
-
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.table import Table
-
-    console = Console()
-
-    # Basic info
-    basic_info = Table(show_header=False, box=None)
-    basic_info.add_column("Key", style="bold cyan")
-    basic_info.add_column("Value", style="white")
-
-    basic_info.add_row("Cache Key", cache_key)
-    basic_info.add_row("Created", cache_info.get("created_at_iso", "unknown"))
-    basic_info.add_row("Size", f"{cache_info.get('size_mb', 0):.1f} MB")
-    basic_info.add_row("Files", str(len(cache_info.get("data_files", []))))
-
-    console.print(Panel(basic_info, title="Cache Information"))
-
-    # Generation parameters
-    gen_params = cache_info.get("generation_params", {})
-    if gen_params:
-        params_table = Table(show_header=False, box=None)
-        params_table.add_column("Parameter", style="bold yellow")
-        params_table.add_column("Value", style="white")
-
-        for key, value in gen_params.items():
-            if key != "schema_content" and value is not None:
-                params_table.add_row(key, str(value))
-
-        console.print(Panel(params_table, title="Generation Parameters"))
-
-    # Data files
-    data_files = cache_info.get("data_files", [])
-    if data_files:
-        console.print("\n[bold green]Data Files:[/bold green]")
-        for i, file_name in enumerate(data_files, 1):
-            console.print(f"  {i}. {file_name}")
-
-
-@cache.command("clean")
-@click.option(
-    "--all",
-    is_flag=True,
-    help="Remove all cached datasets",
-)
-@click.option(
-    "--older-than",
-    type=int,
-    help="Remove caches older than N days",
-)
-@click.option(
-    "--yes",
-    "-y",
-    is_flag=True,
-    help="Auto-confirm removal without prompting",
-)
-@click.argument("cache_keys", nargs=-1)
-def clean_cache(
-    all: bool = False,
-    older_than: int | None = None,
-    yes: bool = False,
-    cache_keys: tuple = (),
-) -> None:
-    """Remove cached datasets.
-
-    Can remove specific caches by key, all caches, or caches older than N days.
-    """
-    cache_manager = CacheManager()
-
-    if not any([all, older_than, cache_keys]):
-        click.echo("Specify cache keys, --all, or --older-than option")
-        return
-
-    caches_to_remove = []
-
-    if all:
-        caches_to_remove = cache_manager.list_caches()
-    elif older_than:
-        import time
-
-        cutoff_time = time.time() - (older_than * 24 * 60 * 60)
-        all_caches = cache_manager.list_caches()
-        caches_to_remove = [
-            c for c in all_caches if c.get("created_at", 0) < cutoff_time
-        ]
-    elif cache_keys:
-        all_caches = cache_manager.list_caches()
-        for key in cache_keys:
-            # Support partial key matching
-            if len(key) < 64:
-                matching = [
-                    c for c in all_caches if c.get("cache_key", "").startswith(key)
-                ]
-                caches_to_remove.extend(matching)
-            else:
-                cache_info = cache_manager.get_cache_info(key)
-                if cache_info:
-                    caches_to_remove.append(cache_info)
-
-    if not caches_to_remove:
-        click.echo("No caches to remove")
-        return
-
-    # Show what will be removed
-    total_size_mb = sum(c.get("size_mb", 0) for c in caches_to_remove)
-    click.echo(
-        f"Will remove {len(caches_to_remove)} cached datasets ({total_size_mb:.1f} MB total):"
-    )
-
-    for cache in caches_to_remove:
-        cache_key = cache.get("cache_key", "unknown")
-        size_mb = cache.get("size_mb", 0)
-        created = cache.get("created_at_iso", "unknown")
-        click.echo(f"  - {cache_key[:12]}... ({size_mb:.1f} MB, created {created})")
-
-    # Confirm removal
-    if not yes:
-        if not click.confirm("\nAre you sure you want to remove these caches?"):
-            click.echo("Cancelled")
-            return
-
-    # Remove caches
-    successful = 0
-    failed = 0
-
-    for cache in caches_to_remove:
-        cache_key = cache.get("cache_key", "")
-        if cache_manager.clear_cache(cache_key):
-            successful += 1
-        else:
-            failed += 1
-
-    if successful > 0:
-        display_success(f"Successfully removed {successful} cached datasets")
-
-    if failed > 0:
-        display_error(f"Failed to remove {failed} cached datasets")
-
-
-@cache.command("stats")
-def cache_stats() -> None:
-    """Show cache statistics and usage."""
-    cache_manager = CacheManager()
-    stats = cache_manager.get_cache_stats()
-
-    from rich.console import Console
-    from rich.table import Table
-
-    console = Console()
-
-    # Stats table
-    table = Table(title="Cache Statistics", show_header=False, box=None)
-    table.add_column("Metric", style="bold cyan")
-    table.add_column("Value", style="white")
-
-    table.add_row("Total Cached Datasets", str(stats["total_caches"]))
-    table.add_row("Total Cache Size", f"{stats['total_size_mb']:.1f} MB")
-
-    if stats["newest_cache"]:
-        newest_date = stats["newest_cache"].get("created_at_iso", "unknown")
-        table.add_row("Newest Cache", newest_date)
-
-    if stats["oldest_cache"]:
-        oldest_date = stats["oldest_cache"].get("created_at_iso", "unknown")
-        table.add_row("Oldest Cache", oldest_date)
-
-    # Cache directory info
-    cache_dir = cache_manager.cache_dir
-    table.add_row("Cache Directory", str(cache_dir))
-
-    console.print(table)
-
-    if stats["total_caches"] > 0:
-        console.print(
-            "\nUse [bold green]milvus-ingest cache list[/bold green] to see all cached datasets"
-        )
-        console.print(
-            "Use [bold yellow]milvus-ingest cache clean --help[/bold yellow] to manage cache cleanup"
-        )
 
 
 @main.command()
@@ -1910,14 +1496,11 @@ def _save_with_high_performance_generator(
     seed: int | None = None,
     show_progress: bool = True,
     file_size: str | None = None,
-    rows_per_file: int = 1000000,
     num_partitions: int | None = None,
     num_shards: int | None = None,
     file_count: int | None = None,
     num_workers: int | None = None,
     verbose: bool = False,
-    chunk_and_merge: bool = False,
-    chunk_size: str = "512MB",
 ) -> int:
     """Save using high-performance vectorized generator optimized for large-scale data.
 
@@ -1964,14 +1547,11 @@ def _save_with_high_performance_generator(
                 batch_size=optimized_batch_size,
                 seed=seed,
                 file_size=file_size,
-                rows_per_file=rows_per_file,
                 num_partitions=num_partitions,
                 num_shards=num_shards,
                 file_count=file_count,
                 num_workers=num_workers,
                 progress_callback=update_progress,
-                chunk_and_merge=chunk_and_merge,
-                chunk_size=chunk_size,
                 skip_validation=False,  # Always validate final output
             )
 
@@ -1993,13 +1573,10 @@ def _save_with_high_performance_generator(
                 batch_size=optimized_batch_size,
                 seed=seed,
                 file_size=file_size,
-                rows_per_file=rows_per_file,
                 num_partitions=num_partitions,
                 num_shards=num_shards,
                 file_count=file_count,
                 num_workers=num_workers,
-                chunk_and_merge=chunk_and_merge,
-                chunk_size=chunk_size,
                 skip_validation=False,  # Always validate final output
             )
 
