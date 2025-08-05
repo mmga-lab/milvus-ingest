@@ -1014,8 +1014,8 @@ def cache_info(cache_key: str) -> None:
         return
 
     from rich.console import Console
-    from rich.table import Table
     from rich.panel import Panel
+    from rich.table import Table
 
     console = Console()
 
@@ -1187,10 +1187,10 @@ def cache_stats() -> None:
 
     if stats["total_caches"] > 0:
         console.print(
-            f"\nUse [bold green]milvus-ingest cache list[/bold green] to see all cached datasets"
+            "\nUse [bold green]milvus-ingest cache list[/bold green] to see all cached datasets"
         )
         console.print(
-            f"Use [bold yellow]milvus-ingest cache clean --help[/bold yellow] to manage cache cleanup"
+            "Use [bold yellow]milvus-ingest cache clean --help[/bold yellow] to manage cache cleanup"
         )
 
 
@@ -1971,7 +1971,6 @@ def _save_with_high_performance_generator(
             print(f"✅ Generation completed: {actual_total_rows:,} rows")
 
             # Show completion summary after progress bar
-            from rich.console import Console
 
             console = Console()
             console.print(

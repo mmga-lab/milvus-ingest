@@ -157,28 +157,26 @@ class MilvusInserter:
             # Insert data in batches
             if show_progress:
                 print(f"📥 Inserting {data_file.name} ({total_rows:,} rows)...")
-            
+
             total_batches = (total_rows + batch_size - 1) // batch_size
             for i in range(0, total_rows, batch_size):
                 batch_num = i // batch_size + 1
-                
+
                 # Show progress periodically
                 if show_progress and batch_num % 10 == 0:
                     progress_pct = 100.0 * i / total_rows
-                    print(f"📊 Progress: {i:,}/{total_rows:,} rows ({progress_pct:.1f}%)")
-                
+                    print(
+                        f"📊 Progress: {i:,}/{total_rows:,} rows ({progress_pct:.1f}%)"
+                    )
+
                 if file_format == "parquet":
                     batch_df = data_source.iloc[i : i + batch_size]
                     try:
                         # Convert DataFrame to list of dictionaries
-                        data = self._convert_dataframe_to_dict_list(
-                            batch_df, metadata
-                        )
+                        data = self._convert_dataframe_to_dict_list(batch_df, metadata)
                         batch_size_actual = len(batch_df)
                     except Exception as e:
-                        self.logger.error(
-                            f"Failed to convert batch {batch_num}: {e}"
-                        )
+                        self.logger.error(f"Failed to convert batch {batch_num}: {e}")
                         failed_batches.append(
                             {
                                 "file": data_file.name,
@@ -195,14 +193,10 @@ class MilvusInserter:
 
                 try:
                     # Insert using MilvusClient
-                    self.client.insert(
-                        collection_name=final_collection_name, data=data
-                    )
+                    self.client.insert(collection_name=final_collection_name, data=data)
                     total_inserted += batch_size_actual
                 except Exception as e:
-                    self.logger.error(
-                        f"Failed to insert batch {batch_num}: {e}"
-                    )
+                    self.logger.error(f"Failed to insert batch {batch_num}: {e}")
                     failed_batches.append(
                         {
                             "file": data_file.name,

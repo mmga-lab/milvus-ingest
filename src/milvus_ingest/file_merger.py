@@ -141,7 +141,7 @@ class FileMerger:
                     logger.warning(f"Chunk file not found: {chunk_file}")
                     continue
 
-                with open(chunk_file, "r", encoding="utf-8") as f:
+                with open(chunk_file, encoding="utf-8") as f:
                     chunk_data = json.load(f)
 
                 # Handle both single objects and arrays
