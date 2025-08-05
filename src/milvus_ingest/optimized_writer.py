@@ -367,10 +367,6 @@ def _find_primary_key_field(fields: list[dict[str, Any]]) -> dict[str, Any] | No
     return None
 
 
-def _calculate_shard_id(primary_key_value: Any, num_shards: int) -> int:
-    """Calculate shard ID based on primary key hash (simulates Milvus VChannel distribution)."""
-    return hash(str(primary_key_value)) % num_shards
-
 
 def _calculate_partition_id(partition_key_value: Any, num_partitions: int) -> int:
     """Calculate partition ID based on partition key hash."""
@@ -2599,15 +2595,15 @@ def generate_data_optimized(
             f"Partition distribution enabled: {num_partitions} partitions using field '{partition_key_field['name']}'"
         )
 
-    if num_shards and primary_key_field:
-        logger.info(
-            f"Shard distribution enabled: {num_shards} shards using primary key '{primary_key_field['name']}'"
-        )
-    elif num_shards:
-        logger.warning(
-            "num_shards specified but no primary key field found in schema. Ignoring shards parameter."
-        )
-        num_shards = None
+    if num_shards:
+        if primary_key_field.get("auto_id", False):
+            logger.info(
+                f"Shard distribution enabled: {num_shards} shards using auto-generated primary key '{primary_key_field['name']}'"
+            )
+        else:
+            logger.info(
+                f"Shard distribution enabled: {num_shards} shards using primary key '{primary_key_field['name']}'"
+            )
 
     # Use new parameter validation and calculation system
     try:
