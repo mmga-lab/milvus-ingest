@@ -1,0 +1,60 @@
+{
+  "collection_name": "media_gallery",
+  "description": "Multimedia content with multiple vector types and nullable fields",
+  "enable_dynamic_field": true,
+  "fields": [
+    {
+      "name": "media_id",
+      "type": "Int64",
+      "is_primary": true,
+      "description": "Media content identifier"
+    },
+    {
+      "name": "content_embedding",
+      "type": "FloatVector",
+      "dim": 256,
+      "description": "Main content embedding"
+    },
+    {
+      "name": "thumbnail_embedding",
+      "type": "Float16Vector",
+      "dim": 384,
+      "nullable": true,
+      "description": "Thumbnail embedding (optional)"
+    },
+    {
+      "name": "fingerprint_hash",
+      "type": "BinaryVector",
+      "dim": 128,
+      "nullable": true,
+      "description": "Content fingerprint hash (optional)"
+    },
+    {
+      "name": "media_type",
+      "type": "VarChar",
+      "max_length": 50,
+      "default_value": "image",
+      "description": "Type of media (image, video, audio)"
+    },
+    {
+      "name": "user_id",
+      "type": "Int64",
+      "min": 1,
+      "max": 1000000,
+      "is_partition_key": true,
+      "description": "User ID for partitioning"
+    },
+    {
+      "name": "properties",
+      "type": "JSON",
+      "nullable": true,
+      "description": "Media properties (resolution, duration, etc.)"
+    },
+    {
+      "name": "is_public",
+      "type": "Bool",
+      "default_value": true,
+      "description": "Public visibility status"
+    }
+  ]
+}

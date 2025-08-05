@@ -1,0 +1,47 @@
+{
+  "collection_name": "ecommerce_products",
+  "description": "E-commerce product search with nullable fields",
+  "enable_dynamic_field": true,
+  "fields": [
+    {
+      "name": "sku",
+      "type": "VarChar",
+      "max_length": 50,
+      "is_primary": true,
+      "description": "Product SKU identifier"
+    },
+    {
+      "name": "title",
+      "type": "VarChar",
+      "max_length": 300,
+      "description": "Product title"
+    },
+    {
+      "name": "description",
+      "type": "VarChar",
+      "max_length": 1000,
+      "nullable": true,
+      "description": "Product description (optional)"
+    },
+    {
+      "name": "brand",
+      "type": "VarChar",
+      "max_length": 100,
+      "nullable": true,
+      "description": "Product brand (optional)"
+    },
+    {
+      "name": "store_id",
+      "type": "VarChar",
+      "max_length": 50,
+      "is_partition_key": true,
+      "description": "Store identifier for partitioning"
+    },
+    {
+      "name": "product_vector",
+      "type": "FloatVector",
+      "dim": 256,
+      "description": "Product semantic embedding"
+    }
+  ]
+}

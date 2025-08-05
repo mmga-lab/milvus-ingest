@@ -1,0 +1,41 @@
+{
+  "collection_name": "product_catalog",
+  "description": "Simple product catalog for getting started with auto_id",
+  "enable_dynamic_field": true,
+  "fields": [
+    {
+      "name": "product_id",
+      "type": "Int64",
+      "is_primary": true,
+      "auto_id": true,
+      "description": "Auto-generated product ID"
+    },
+    {
+      "name": "product_name",
+      "type": "VarChar",
+      "max_length": 200,
+      "description": "Product name"
+    },
+    {
+      "name": "category_id",
+      "type": "Int64",
+      "min": 1,
+      "max": 100,
+      "is_partition_key": true,
+      "description": "Product category ID for partitioning"
+    },
+    {
+      "name": "price",
+      "type": "Float",
+      "min": 0.01,
+      "max": 10000.0,
+      "description": "Product price in USD"
+    },
+    {
+      "name": "product_embedding",
+      "type": "FloatVector",
+      "dim": 128,
+      "description": "Product feature embedding for similarity search"
+    }
+  ]
+}
