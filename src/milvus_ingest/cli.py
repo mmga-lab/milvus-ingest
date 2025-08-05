@@ -405,28 +405,37 @@ def generate(
             effective_display_rows = 0  # Will be calculated
         else:
             effective_display_rows = total_rows
-        
+
         # If both file_count and file_size are specified, estimate total rows for display
         if file_count and file_size and effective_display_rows == 0:
             try:
                 # Import here to avoid circular imports
-                from .optimized_writer import _enhanced_estimate_row_size_from_sample, _parse_file_size
-                
+                from .optimized_writer import (
+                    _enhanced_estimate_row_size_from_sample,
+                    _parse_file_size,
+                )
+
                 # Quick estimation for display purposes
                 sample_size = min(1000, 5000)  # Smaller sample for speed
                 estimated_bytes_per_row, _ = _enhanced_estimate_row_size_from_sample(
-                    fields, sample_size, 0, output_format, {"fields": fields}, seed, num_iterations=1
+                    fields,
+                    sample_size,
+                    0,
+                    output_format,
+                    {"fields": fields},
+                    seed,
+                    num_iterations=1,
                 )
-                
+
                 # Parse file size and calculate rows
                 file_size_bytes = _parse_file_size(file_size)
                 rows_per_file = int(file_size_bytes / estimated_bytes_per_row)
                 estimated_total_rows = rows_per_file * file_count
-                
+
                 effective_display_rows = f"~{estimated_total_rows:,} (calculated)"
             except Exception:
                 effective_display_rows = f"calculated ({file_count} × {file_size})"
-        
+
         # Display schema preview
         generation_config = {
             "total_rows": effective_display_rows,
@@ -649,7 +658,7 @@ def generate(
         )
         # Use a special value to indicate rows should be calculated
         effective_total_rows = 0  # This tells the generator to calculate rows
-    
+
     # Use high-performance data generation (default and only mode)
     logger.info(
         "Starting high-performance data generation",
@@ -731,7 +740,9 @@ def generate(
                 logger.warning("No data files or meta.json found for caching")
 
         # Output is always a directory now
-        click.echo(f"Saved {actual_total_rows} rows to directory {output_path.resolve()}")
+        click.echo(
+            f"Saved {actual_total_rows} rows to directory {output_path.resolve()}"
+        )
     except Exception as e:
         log_error_with_context(
             e,
@@ -1230,6 +1241,11 @@ def cache_stats() -> None:
     is_flag=True,
     help="Use boto3 instead of AWS CLI for uploads (AWS CLI is default and more reliable)",
 )
+@click.option(
+    "--use-mc",
+    is_flag=True,
+    help="Use MinIO Client (mc) CLI for uploads (prioritized over AWS CLI and boto3)",
+)
 def upload(
     local_path: Path,
     s3_path: str,
@@ -1240,20 +1256,24 @@ def upload(
     no_verify_ssl: bool = False,
     no_progress: bool = False,
     use_boto3: bool = False,
+    use_mc: bool = False,
 ) -> None:
     """Upload generated data files to S3/MinIO.
 
     \b
     Examples:
-        # Upload to AWS S3
+        # Upload to AWS S3 (using AWS CLI by default)
         milvus-ingest upload --local-path ./output --s3-path s3://my-bucket/data/
 
-        # Upload to MinIO
-        milvus-ingest upload --local-path ./output --s3-path s3://my-bucket/data/ --endpoint-url http://localhost:9000
+        # Upload to MinIO using mc CLI
+        milvus-ingest upload --local-path ./output --s3-path s3://my-bucket/data/ --endpoint-url http://localhost:9000 --use-mc
+
+        # Upload using boto3 (legacy mode)
+        milvus-ingest upload --local-path ./output --s3-path s3://my-bucket/data/ --use-boto3
 
         # With explicit credentials
         milvus-ingest upload --local-path ./output --s3-path s3://my-bucket/data/ \\
-            --access-key-id mykey --secret-access-key mysecret
+            --access-key-id mykey --secret-access-key mysecret --use-mc
     """
     try:
         # Parse S3 URL
@@ -1266,7 +1286,8 @@ def upload(
             secret_access_key=secret_access_key,
             region_name=region,
             verify_ssl=not no_verify_ssl,
-            use_aws_cli=not use_boto3,
+            use_aws_cli=not use_boto3 and not use_mc,
+            use_mc_cli=use_mc,
         )
 
         # Test connection
@@ -1320,15 +1341,21 @@ def upload(
             if "total_files" in validation:
                 # Old format (backwards compatibility)
                 table.add_row("Total Files", f"{validation['total_files']}")
-                table.add_row("Validated Files", f"{validation.get('validated_files', 0)}")
                 table.add_row(
-                    "Failed Validations", f"{len(validation.get('failed_validations', []))}"
+                    "Validated Files", f"{validation.get('validated_files', 0)}"
+                )
+                table.add_row(
+                    "Failed Validations",
+                    f"{len(validation.get('failed_validations', []))}",
                 )
             else:
                 # New S3MinimalValidator format
                 table.add_row("Total Files", f"{summary.get('total_files', 0)}")
                 table.add_row("Total Rows", f"{summary.get('total_rows', 0):,}")
-                table.add_row("Total Size", f"{summary.get('total_size', 0) / (1024 * 1024):.2f} MB")
+                table.add_row(
+                    "Total Size",
+                    f"{summary.get('total_size', 0) / (1024 * 1024):.2f} MB",
+                )
                 table.add_row("Format", f"{summary.get('format', 'unknown')}")
                 table.add_row("Errors", f"{len(validation.get('errors', []))}")
 
@@ -1337,7 +1364,7 @@ def upload(
             # Show failed validations if any
             failed_validations = validation.get("failed_validations", [])
             errors = validation.get("errors", [])
-            
+
             if failed_validations:
                 console.print("\n[bold red]Failed File Validations:[/bold red]")
                 for failure in failed_validations:
@@ -1728,6 +1755,11 @@ def verify_milvus_data(
     is_flag=True,
     help="Use boto3 instead of AWS CLI for uploads (AWS CLI is default and more reliable)",
 )
+@click.option(
+    "--use-mc",
+    is_flag=True,
+    help="Use MinIO Client (mc) CLI for uploads (prioritized over AWS CLI and boto3)",
+)
 def import_to_milvus(
     collection_name: str | None,
     local_path: Path,
@@ -1744,6 +1776,7 @@ def import_to_milvus(
     drop_if_exists: bool = False,
     use_autoindex: bool = False,
     use_boto3: bool = False,
+    use_mc: bool = False,
 ) -> None:
     """Upload data to S3/MinIO and bulk import to Milvus in one step.
 
@@ -1752,17 +1785,20 @@ def import_to_milvus(
 
     \b
     Examples:
-        # Upload and import using collection name from meta.json
+        # Upload and import using collection name from meta.json (AWS CLI by default)
         milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000
 
-        # Upload and import with custom collection name
-        milvus-ingest to-milvus import --collection-name my_collection --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000
+        # Upload and import using mc CLI
+        milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-mc
 
-        # Upload and import with credentials
-        milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret
+        # Upload and import with custom collection name
+        milvus-ingest to-milvus import --collection-name my_collection --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-mc
+
+        # Upload and import with credentials using mc CLI
+        milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret --use-mc
 
         # Upload and import then wait for completion
-        milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait
+        milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait --use-mc
     """
     from .milvus_importer import MilvusBulkImporter
     from .uploader import S3Uploader
@@ -1794,7 +1830,8 @@ def import_to_milvus(
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             verify_ssl=not no_verify_ssl,
-            use_aws_cli=not use_boto3,
+            use_aws_cli=not use_boto3 and not use_mc,
+            use_mc_cli=use_mc,
         )
 
         # Ensure s3_path ends with /
@@ -1902,12 +1939,14 @@ def _save_with_high_performance_generator(
 
             # Generate data (simplified without progress bar)
             print("🚀 Generating data with high-performance mode...")
-            
+
             # Simple progress callback for print-based progress
             def update_progress(completed_rows: int) -> None:
                 if completed_rows % 50000 == 0:  # Print every 50k rows
                     progress_pct = 100.0 * completed_rows / total_rows
-                    print(f"📊 Progress: {completed_rows:,}/{total_rows:,} rows ({progress_pct:.1f}%)")
+                    print(
+                        f"📊 Progress: {completed_rows:,}/{total_rows:,} rows ({progress_pct:.1f}%)"
+                    )
 
             # Run optimized generator with progress callback
             files_created, actual_total_rows = generate_data_optimized(

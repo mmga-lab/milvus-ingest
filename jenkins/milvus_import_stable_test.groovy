@@ -1,5 +1,5 @@
 // Enhanced pipeline for Milvus import stability testing with comprehensive configurations
-// Supports multiple schemas, file formats, storage versions, and large-scale testing
+// Supports multiple schemas, file formats, storage versions, upload methods, and large-scale testing
 
 pipeline {
     options {
@@ -137,6 +137,32 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             description: 'Shard Count (VChannels)',
             name: 'shard_count',
             defaultValue: '16'
+        )
+        choice(
+            description: '''Upload Method Selection:
+
+• mc_cli - Use MinIO Client (mc) CLI (Recommended for MinIO)
+  - Native MinIO protocol support
+  - Optimal performance for MinIO servers  
+  - Automatic installation and configuration
+  - Best choice for MinIO deployments
+
+• aws_cli - Use AWS CLI (Default, Recommended for AWS S3)
+  - Reliable for large files with multipart upload
+  - Battle-tested upload reliability
+  - Good for AWS S3 and general S3-compatible storage
+  - Automatic retry and error handling
+
+• boto3 - Use boto3 Python library (Legacy)
+  - Python-based upload method
+  - Fallback for restricted environments
+  - Use when CLI tools are not available''',
+            name: 'upload_method',
+            choices: [
+                'mc_cli',    // MinIO Client (mc) CLI (Recommended for MinIO)
+                'aws_cli',    // AWS CLI (Recommended for AWS S3)
+                'boto3'       // boto3 library (legacy fallback)
+            ]
         )
     }
     
@@ -365,12 +391,29 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             minioEndpoint = "http://${minioHost}:9000"
                         }
                         
+                        // Determine upload method flags based on user selection
+                        def uploadFlags = ""
+                        switch(params.upload_method) {
+                            case 'mc_cli':
+                                uploadFlags = "--use-mc"
+                                break
+                            case 'boto3':
+                                uploadFlags = "--use-boto3"
+                                break
+                            case 'aws_cli':
+                            default:
+                                uploadFlags = ""  // AWS CLI is default, no flag needed
+                                break
+                        }
+                        
                         sh """
                         echo "Starting bulk import to Milvus:"
                         echo "Milvus URI: ${milvusUri}"
                         echo "MinIO Endpoint: ${minioEndpoint}"
                         echo "MinIO Bucket: ${minioBucket}"
                         echo "Data Path: ${outputPath}"
+                        echo "Upload Method: ${params.upload_method}"
+                        echo "Upload Flags: ${uploadFlags}"
                         
                         # Import data to Milvus via MinIO from current workspace
                         pdm run milvus-ingest to-milvus import \\
@@ -384,9 +427,9 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --drop-if-exists \\
                             --wait \\
                             --timeout 4800 \\
-                            --use-boto3
+                            ${uploadFlags}
                         
-                        echo "Import completed successfully"
+                        echo "Import completed successfully using ${params.upload_method} method"
                         """
                     }
                 }
@@ -470,6 +513,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                     echo "File Size: ${params.file_size}"
                     echo "Format: ${params.file_format}"
                     echo "Storage Version: ${params.storage_version}"
+                    echo "Upload Method: ${params.upload_method}"
                     echo "Partitions: ${params.partition_count}"
                     echo "Shards: ${params.shard_count}"
 

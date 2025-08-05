@@ -131,11 +131,12 @@ milvus-ingest cache clean <cache_key1> <cache_key2> # Remove specific caches
 milvus-ingest clean                         # Clean up generated files
 
 # Upload to S3/MinIO (standalone upload, useful for separate upload/import workflow)
-# Note: AWS CLI is now the default upload method (more reliable for large files)
+# Note: Multiple upload methods supported (AWS CLI default, mc CLI for MinIO, boto3 legacy)
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/              # Upload to AWS S3 (uses AWS CLI by default)
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --endpoint-url http://localhost:9000  # Upload to MinIO (uses AWS CLI by default)
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --endpoint-url http://localhost:9000 --use-mc  # Upload to MinIO using mc CLI (recommended for MinIO)
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --no-verify-ssl  # Disable SSL verification
-milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --access-key-id KEY --secret-access-key SECRET  # With credentials
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --access-key-id KEY --secret-access-key SECRET --use-mc  # With credentials using mc CLI
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/prefix/ --use-boto3   # Use boto3 instead of AWS CLI (legacy mode)
 
 # Send data to Milvus
@@ -148,13 +149,14 @@ milvus-ingest to-milvus insert ./output --use-autoindex                # Use AUT
 
 # Bulk import to Milvus (upload + import in one step)  
 # Note: Combines upload and import for convenience, includes auto-collection creation
-# Note: AWS CLI is now the default upload method (more reliable for large files)
+# Note: Multiple upload methods supported (AWS CLI default, mc CLI for MinIO, boto3 legacy)
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000  # Upload and import (uses AWS CLI + FLAT index by default)
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --collection-name my_collection  # Override collection name
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait  # Wait for completion
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret  # With credentials
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --drop-if-exists  # Drop and recreate
-milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-autoindex  # Use AUTOINDEX for better performance
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-mc  # Upload and import using mc CLI (recommended for MinIO)
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --collection-name my_collection --use-mc  # Override collection name with mc CLI
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait --use-mc  # Wait for completion with mc CLI
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --access-key-id key --secret-access-key secret --use-mc  # With credentials using mc CLI
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --drop-if-exists --use-mc  # Drop and recreate with mc CLI
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-autoindex --use-mc  # Use AUTOINDEX for better performance with mc CLI
 milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-boto3  # Use boto3 instead of AWS CLI (legacy mode)
 
 # Verify data in Milvus
@@ -209,10 +211,14 @@ The validation system performs three essential checks:
 
 This multi-layered approach ensures complete data integrity from generation through upload while maintaining high performance.
 
-## AWS CLI Integration (Default Upload Method)
+## Upload Methods
 
-### Automatic Installation
-The system now uses AWS CLI as the default upload method for better reliability, especially with large files. If AWS CLI is not installed, the tool will automatically attempt to install it:
+The system supports three upload methods for S3-compatible storage, with intelligent selection based on the scenario:
+
+### 1. AWS CLI (Default for AWS S3)
+
+**Automatic Installation:**
+AWS CLI is the default upload method for AWS S3 and general S3-compatible storage. If AWS CLI is not installed, the tool will automatically attempt to install it:
 
 ```bash
 # AWS CLI will be automatically installed if not found
@@ -250,15 +256,76 @@ When AWS CLI is installed with `--user`, you'll see guidance like:
 - **Production Ready**: Battle-tested upload reliability
 - **Automatic Installation**: Zero-configuration setup
 
-### When to Use boto3 Legacy Mode
-- AWS CLI installation issues in restricted environments
+### 2. MinIO Client (mc) CLI (Recommended for MinIO)
+
+**Automatic Installation:**
+The MinIO Client (mc) is the native CLI for MinIO and provides optimal performance for MinIO deployments. If mc CLI is not installed, the tool will automatically attempt to install it:
+
+```bash
+# mc CLI will be automatically installed if not found when using --use-mc
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/ --endpoint-url http://localhost:9000 --use-mc
+```
+
+**Installation Process:**
+- Downloads the appropriate mc binary for your OS/architecture from MinIO's official repository
+- Installs to `~/.local/bin/` directory with proper permissions
+- Automatically configures PATH for the current session
+- Provides guidance for permanent PATH setup
+
+**Key Features:**
+- **Native MinIO Support**: Designed specifically for MinIO servers
+- **Optimal Performance**: Direct integration with MinIO protocols
+- **Automatic Configuration**: Creates temporary aliases for connection management
+- **Cross-Platform**: Supports Linux, macOS, and Windows (x86_64, ARM64)
+- **SSL Control**: Supports `--insecure` flag for self-signed certificates
+
+**Usage Examples:**
+```bash
+# Upload to MinIO using mc CLI (recommended)
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/ --endpoint-url http://localhost:9000 --use-mc
+
+# With credentials
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/ --endpoint-url http://localhost:9000 --access-key-id mykey --secret-access-key mysecret --use-mc
+
+# Disable SSL verification
+milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/ --endpoint-url http://localhost:9000 --no-verify-ssl --use-mc
+
+# Bulk import with mc CLI
+milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --use-mc
+```
+
+**Benefits of mc CLI for MinIO:**
+- **Native Protocol Support**: Optimized for MinIO's native protocols
+- **Better Error Messages**: More detailed MinIO-specific error reporting
+- **Alias Management**: Automatic temporary alias creation and cleanup
+- **Performance**: Often faster than generic S3 clients for MinIO
+- **MinIO Features**: Access to MinIO-specific features and optimizations
+
+### 3. boto3 (Legacy Mode)
+
+**When to Use boto3 Legacy Mode:**
+- AWS CLI or mc CLI installation issues in restricted environments
 - Specific boto3 compatibility requirements
 - Environments where subprocess execution is restricted
+- Testing and debugging scenarios
 
 ```bash
 # Force boto3 usage (legacy mode)
 milvus-ingest upload --local-path ./output --s3-path s3://bucket/data/ --use-boto3
 ```
+
+### Upload Method Selection Priority
+
+The system automatically selects the upload method based on the following priority:
+1. **mc CLI** (if `--use-mc` flag is specified)
+2. **AWS CLI** (if `--use-boto3` is not specified, default)
+3. **boto3** (if `--use-boto3` flag is specified, legacy fallback)
+
+**Recommendations:**
+- **For MinIO**: Use `--use-mc` for optimal performance and compatibility
+- **For AWS S3**: Use default AWS CLI (no additional flags needed)
+- **For Other S3-Compatible**: Use AWS CLI (default) or boto3 (`--use-boto3`) based on compatibility
+- **For Restricted Environments**: Use `--use-boto3` as a fallback option
 
 ## Architecture Overview
 
