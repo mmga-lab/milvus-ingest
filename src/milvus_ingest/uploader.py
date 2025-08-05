@@ -96,6 +96,7 @@ class S3Uploader:
         self.secret_access_key = secret_access_key
         self.region_name = region_name
         self.verify_ssl = verify_ssl
+        self.endpoint_url = endpoint_url
 
         # Get credentials from environment if not provided
         if not self.access_key_id:
@@ -144,7 +145,6 @@ class S3Uploader:
                 verify=self.verify_ssl,
                 config=retry_config,
             )
-            self.endpoint_url = endpoint_url
             self.logger.info(
                 "S3 client initialized",
                 extra={
