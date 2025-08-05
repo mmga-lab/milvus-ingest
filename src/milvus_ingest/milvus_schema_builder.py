@@ -47,6 +47,10 @@ class MilvusSchemaBuilder:
         for field_info in metadata["schema"]["fields"]:
             field_name = field_info["name"]
             field_type = field_info["type"]
+            
+            # Log partition key field
+            if field_info.get("is_partition_key", False):
+                self.logger.info(f"Setting partition key field: {field_name}")
 
             # Map field type to Milvus DataType
             milvus_type = self._get_milvus_datatype(field_type)
@@ -59,6 +63,7 @@ class MilvusSchemaBuilder:
                     "max_length": field_info.get("max_length", 65535),
                     "is_primary": field_info.get("is_primary", False),
                     "auto_id": field_info.get("auto_id", False),
+                    "is_partition_key": field_info.get("is_partition_key", False),
                 }
                 # Enable analyzer for BM25 input fields
                 if field_name in bm25_input_fields:
@@ -79,6 +84,7 @@ class MilvusSchemaBuilder:
                         "datatype": milvus_type,
                         "is_primary": field_info.get("is_primary", False),
                         "auto_id": field_info.get("auto_id", False),
+                        "is_partition_key": field_info.get("is_partition_key", False),
                     }
                 else:
                     kwargs = {
@@ -87,6 +93,7 @@ class MilvusSchemaBuilder:
                         "dim": field_info.get("dim"),
                         "is_primary": field_info.get("is_primary", False),
                         "auto_id": field_info.get("auto_id", False),
+                        "is_partition_key": field_info.get("is_partition_key", False),
                     }
                 # Vector fields typically don't have nullable/default_value, but add if present
                 if "nullable" in field_info:
@@ -106,6 +113,7 @@ class MilvusSchemaBuilder:
                     else None,
                     "is_primary": field_info.get("is_primary", False),
                     "auto_id": field_info.get("auto_id", False),
+                    "is_partition_key": field_info.get("is_partition_key", False),
                 }
                 # Add max_length for VarChar element type
                 if field_info.get("element_type") in ["VarChar", "String"]:
@@ -125,6 +133,7 @@ class MilvusSchemaBuilder:
                     "datatype": milvus_type,
                     "is_primary": field_info.get("is_primary", False),
                     "auto_id": field_info.get("auto_id", False),
+                    "is_partition_key": field_info.get("is_partition_key", False),
                 }
                 # Add nullable and default_value if present
                 if "nullable" in field_info:
@@ -296,6 +305,10 @@ class MilvusSchemaBuilder:
             
             # Print the raw collection info as returned by Milvus
             import json
+            
+            # First log the type of collection_info for debugging
+            self.logger.info(f"Collection info type: {type(collection_info)}")
+            
             if hasattr(collection_info, '__dict__'):
                 # Convert object to dict if needed
                 info_dict = vars(collection_info)
@@ -303,7 +316,29 @@ class MilvusSchemaBuilder:
             elif isinstance(collection_info, dict):
                 self.logger.info(f"Collection Description:\n{json.dumps(collection_info, indent=2, default=str)}")
             else:
-                self.logger.info(f"Collection Description: {collection_info}")
+                # Try to access attributes directly if it's a Milvus object
+                try:
+                    self.logger.info(f"Collection name: {getattr(collection_info, 'collection_name', 'N/A')}")
+                    self.logger.info(f"Number of shards: {getattr(collection_info, 'num_shards', 'N/A')}")
+                    self.logger.info(f"Number of partitions: {getattr(collection_info, 'num_partitions', 'N/A')}")
+                    
+                    # Try to get schema
+                    schema = getattr(collection_info, 'schema', None)
+                    if schema:
+                        fields = getattr(schema, 'fields', [])
+                        self.logger.info("Fields:")
+                        for field in fields:
+                            field_info = f"  - {getattr(field, 'name', 'unknown')}: {getattr(field, 'dtype', 'unknown')}"
+                            if getattr(field, 'is_primary', False):
+                                field_info += " (PRIMARY KEY)"
+                            if getattr(field, 'auto_id', False):
+                                field_info += " (AUTO_ID)"
+                            if getattr(field, 'is_partition_key', False):
+                                field_info += " (PARTITION KEY)"
+                            self.logger.info(field_info)
+                except Exception as e:
+                    self.logger.info(f"Collection Description (raw): {collection_info}")
+                    self.logger.warning(f"Could not parse collection details: {e}")
             
             self.logger.info("=" * 60)
             
