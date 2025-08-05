@@ -1586,7 +1586,7 @@ def _generate_files_parallel(
             validator = MinimalValidator(output_dir, console)
 
             # Run validation
-            print("🔍 Running minimal validation (schema + count)...")
+            print("🔍 Running file integrity validation...")
             logger.info("Running minimal file validation...")
             validation_results = validator.validate()
 
@@ -3415,7 +3415,7 @@ def generate_data_optimized(
             validator = MinimalValidator(output_dir, console)
 
             # Run validation
-            print("🔍 Running minimal validation (schema + count)...")
+            print("🔍 Running file integrity validation...")
             logger.info("Running minimal file validation...")
             validation_results = validator.validate()
 
