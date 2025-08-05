@@ -720,3 +720,64 @@ python bench/profile_memory.py \
 - **String fields**: 30,000-70,000 rows/sec  
 - **Vector fields (768d)**: 15,000-25,000 rows/sec
 - **Memory usage**: ~100-200MB base + 50-200MB per 50K batch
+
+## Important Architecture and Usage Notes
+
+### Running Tests Against Remote Test Environment
+
+If you need to run tests against a remote test environment instead of local Docker Compose:
+
+```bash
+# Remote test environment variables (example)
+export MILVUS_URI=http://10.104.17.43:19530
+export MINIO_HOST=10.104.17.44
+export MINIO_ACCESS_KEY=minioadmin
+export MINIO_SECRET_KEY=minioadmin
+export MINIO_BUCKET=milvus-bucket
+
+# Run tests with remote environment
+pdm run pytest
+```
+
+### Important Parameter Changes
+
+The CLI underwent significant parameter naming changes. Always use the new names:
+- Use `--total-rows` (NOT `--rows`)
+- Use `--file-size` (NOT `--max-file-size`)
+- Use `--rows-per-file` (NOT `--max-rows-per-file`)
+
+### Common Issues and Solutions
+
+#### Large File Generation (>2GB)
+The system automatically enables chunk-and-merge strategy for files ≥2GB:
+```bash
+# Automatically uses chunk-and-merge
+milvus-ingest generate --schema schema.json --file-size 10GB
+
+# Manually control chunk size
+milvus-ingest generate --schema schema.json --file-size 5GB --chunk-size 500MB
+```
+
+#### Memory Issues with Large Datasets
+- Adjust `--batch-size` (default: 50000) to lower values
+- Use `--workers` to control parallel processing
+- Monitor memory usage with verbose logging: `LOGURU_LEVEL=DEBUG`
+
+#### Upload Failures
+- AWS CLI is now the default (more reliable for large files)
+- Falls back to boto3 if AWS CLI not available
+- Force boto3 with `--use-boto3` flag if needed
+
+### Key Performance Considerations
+
+1. **File Format Choice**: Always use Parquet for large datasets (default) - it's significantly faster than JSON
+2. **Batch Size Tuning**: For very large vector dimensions (>1024), consider reducing batch size to 10K-20K
+3. **Worker Processes**: Default is CPU count, but for I/O-bound operations, 2x CPU count may be optimal
+4. **File Partitioning**: The system automatically partitions at 256MB/1M rows - this is optimized for Milvus import
+
+### Development Workflow Tips
+
+1. **Testing Schema Changes**: Always use `--validate-only` first when modifying schemas
+2. **Debugging Generation**: Use `--preview` to inspect first 5 rows without full generation
+3. **Cache Usage**: When iterating on downstream processing, use `--use-cache` to avoid regeneration
+4. **Verification**: Always verify after import - use appropriate level based on needs (count → scalar → full)
