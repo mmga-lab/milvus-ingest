@@ -24,12 +24,12 @@ pipeline {
         string(
             description: 'Milvus URI (required if use_existing_instance is true)',
             name: 'milvus_uri',
-            defaultValue: ''
+            defaultValue: 'http://10.255.11.79:19530'
         )
         string(
             description: 'MinIO Endpoint URL (required if use_existing_instance is true)',
             name: 'minio_endpoint',
-            defaultValue: ''
+            defaultValue: 'http://10.255.194.30:9000'
         )
         string(
             description: 'MinIO Access Key (required if use_existing_instance is true)',
