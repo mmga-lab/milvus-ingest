@@ -1186,8 +1186,8 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
             if "$meta" in df.columns:
                 df["$meta"] = df["$meta"].apply(
                     lambda x: json.dumps(x, ensure_ascii=False)
-                    if x is not None and x != {}
-                    else None
+                    if x is not None
+                    else "{}"
                 )
 
         # Write file
@@ -3188,8 +3188,8 @@ def generate_data_optimized(
             if "$meta" in df.columns:
                 df["$meta"] = df["$meta"].apply(
                     lambda x: json.dumps(x, ensure_ascii=False)
-                    if x is not None and x != {}
-                    else None
+                    if x is not None
+                    else "{}"
                 )
 
         # Write file
