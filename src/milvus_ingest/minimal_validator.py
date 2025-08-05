@@ -27,7 +27,7 @@ class MinimalValidator:
 
     def validate(self) -> dict[str, Any]:
         """Run minimal validation on generated files.
-        
+
         Only validates file integrity (readability, format, size).
         Does not validate row count against metadata since the actual
         generated data IS the ground truth.
@@ -74,7 +74,9 @@ class MinimalValidator:
             # Handle both old format (list of strings) and new format (list of dicts)
             if expected_files and isinstance(expected_files[0], str):
                 # Old format: convert to new format for compatibility
-                expected_files = [{"file_name": name, "rows": None} for name in expected_files]
+                expected_files = [
+                    {"file_name": name, "rows": None} for name in expected_files
+                ]
             elif expected_files and isinstance(expected_files[0], dict):
                 # New format: use as-is
                 pass
@@ -164,7 +166,7 @@ class MinimalValidator:
     def _get_json_row_count(self, file_path: Path) -> int:
         """Get row count from JSON Array file (Milvus bulk import format)."""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
                     return len(data)
@@ -177,9 +179,13 @@ class MinimalValidator:
     def display_results(self, results: dict[str, Any]) -> None:
         """Display validation results using Rich formatting."""
         if results["valid"]:
-            self.console.print("\n✅ [bold green]File Integrity Validation Passed[/bold green]")
+            self.console.print(
+                "\n✅ [bold green]File Integrity Validation Passed[/bold green]"
+            )
         else:
-            self.console.print("\n❌ [bold red]File Integrity Validation Failed[/bold red]")
+            self.console.print(
+                "\n❌ [bold red]File Integrity Validation Failed[/bold red]"
+            )
 
         # Summary table
         table = Table(title="File Integrity Validation Summary", show_header=True)

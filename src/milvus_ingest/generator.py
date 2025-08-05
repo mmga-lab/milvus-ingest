@@ -160,13 +160,15 @@ def generate_mock_data_batches(
     # Generate data in batches
     if show_progress:
         print(f"🎯 Generating {rows:,} rows of mock data...")
-    
+
     for batch_idx in range(total_batches):
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, rows)
-        
+
         if show_progress and batch_idx % 10 == 0:  # Print progress every 10 batches
-            print(f"📊 Progress: {end_idx:,}/{rows:,} rows ({100.0 * end_idx / rows:.1f}%)")
+            print(
+                f"📊 Progress: {end_idx:,}/{rows:,} rows ({100.0 * end_idx / rows:.1f}%)"
+            )
 
         rows_data: list[dict[str, Any]] = []
         for idx in range(start_idx, end_idx):

@@ -256,7 +256,9 @@ class MilvusBulkImporter:
         start_time = time.time()
 
         # Wait for import completion (simplified without progress bar)
-        print(f"⏳ Waiting for import completion (job: {job_id}, timeout: {timeout}s)...")
+        print(
+            f"⏳ Waiting for import completion (job: {job_id}, timeout: {timeout}s)..."
+        )
         last_log_time = 0.0
 
         while time.time() - start_time < timeout:
@@ -274,13 +276,13 @@ class MilvusBulkImporter:
             # Log detailed progress information every 10 seconds
             elapsed = time.time() - start_time
             if elapsed - last_log_time >= 10:
-                print(f"📊 Import progress: {progress_percent}% ({imported_rows:,}/{total_rows:,} rows, {elapsed:.1f}s)")
+                print(
+                    f"📊 Import progress: {progress_percent}% ({imported_rows:,}/{total_rows:,} rows, {elapsed:.1f}s)"
+                )
                 self.logger.info(f"Import progress update for job {job_id}:")
                 self.logger.info(f"  State: {state}")
                 self.logger.info(f"  Progress: {progress_percent}%")
-                self.logger.info(
-                    f"  Imported rows: {imported_rows:,} / {total_rows:,}"
-                )
+                self.logger.info(f"  Imported rows: {imported_rows:,} / {total_rows:,}")
                 self.logger.info(f"  File size processed: {file_size:,} bytes")
                 self.logger.info(f"  Elapsed time: {elapsed:.1f}s")
                 last_log_time = elapsed
@@ -304,9 +306,7 @@ class MilvusBulkImporter:
                 self.logger.error(f"Failure reason: {reason}")
                 self.logger.error(f"State: {state}")
                 self.logger.error(f"Progress when failed: {progress_percent}%")
-                self.logger.error(
-                    f"Rows imported before failure: {imported_rows:,}"
-                )
+                self.logger.error(f"Rows imported before failure: {imported_rows:,}")
                 return False
 
             time.sleep(2)

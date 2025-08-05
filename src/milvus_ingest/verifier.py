@@ -598,7 +598,6 @@ class MilvusVerifier:
 
         return success
 
-
     def _verify_field_values_by_index(
         self,
         field_name: str,
@@ -943,7 +942,6 @@ class MilvusVerifier:
             )
 
         return success
-
 
     def _verify_nullable_fields(self, sample_size: int) -> bool:
         """Verify nullable field behavior."""

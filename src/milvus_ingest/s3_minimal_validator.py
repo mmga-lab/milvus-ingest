@@ -43,7 +43,7 @@ class S3MinimalValidator:
 
     def validate(self) -> dict[str, Any]:
         """Run minimal validation on S3 uploaded files.
-        
+
         Only validates file existence and size for upload integrity.
 
         Returns:
@@ -87,7 +87,9 @@ class S3MinimalValidator:
             # Handle both old format (list of strings) and new format (list of dicts)
             if expected_files and isinstance(expected_files[0], str):
                 # Old format: convert to new format for compatibility
-                expected_files = [{"file_name": name, "rows": None} for name in expected_files]
+                expected_files = [
+                    {"file_name": name, "rows": None} for name in expected_files
+                ]
             elif expected_files and isinstance(expected_files[0], dict):
                 # New format: use as-is
                 pass
@@ -107,7 +109,7 @@ class S3MinimalValidator:
                 else:
                     file_name = file_info.get("file_name")
                     expected_file_size = file_info.get("file_size_bytes")
-                
+
                 # Build S3 key
                 s3_key = f"{self.prefix}/{file_name}" if self.prefix else file_name
 

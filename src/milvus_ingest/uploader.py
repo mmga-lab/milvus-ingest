@@ -952,9 +952,10 @@ class S3Uploader:
     def _install_mc_cli(self) -> bool:
         """Attempt to install mc CLI automatically."""
         try:
-            from .rich_display import display_info
             import platform
             import stat
+
+            from .rich_display import display_info
 
             display_info("🔧 Installing MinIO Client (mc)...")
             self.logger.info("Attempting to install mc CLI...")
@@ -1179,30 +1180,34 @@ class S3Uploader:
             List of file information dictionaries
         """
         try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
+            paginator = self.s3_client.get_paginator("list_objects_v2")
             page_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
 
             files = []
             for page in page_iterator:
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        files.append({
-                            'key': obj['Key'],
-                            'size': obj['Size'],
-                            'last_modified': obj['LastModified'],
-                            'etag': obj.get('ETag', '').strip('"'),
-                            'storage_class': obj.get('StorageClass', 'STANDARD')
-                        })
+                if "Contents" in page:
+                    for obj in page["Contents"]:
+                        files.append(
+                            {
+                                "key": obj["Key"],
+                                "size": obj["Size"],
+                                "last_modified": obj["LastModified"],
+                                "etag": obj.get("ETag", "").strip('"'),
+                                "storage_class": obj.get("StorageClass", "STANDARD"),
+                            }
+                        )
 
             # Sort by key for consistent display
-            files.sort(key=lambda x: x['key'])
+            files.sort(key=lambda x: x["key"])
             return files
 
         except Exception as e:
             self.logger.error(f"Failed to list S3 files: {e}")
             raise
 
-    def _display_file_list(self, files: list[dict[str, Any]], bucket: str, prefix: str) -> None:
+    def _display_file_list(
+        self, files: list[dict[str, Any]], bucket: str, prefix: str
+    ) -> None:
         """Display the list of uploaded files in a formatted table.
 
         Args:
@@ -1214,10 +1219,11 @@ class S3Uploader:
             display_info("📁 No files found in the specified S3 path")
             return
 
+        import datetime
+
         from rich.console import Console
         from rich.table import Table
         from rich.text import Text
-        import datetime
 
         console = Console()
 
@@ -1231,26 +1237,26 @@ class S3Uploader:
         total_size = 0
         for file_info in files:
             # Get file name (remove prefix if present)
-            key = file_info['key']
+            key = file_info["key"]
             if prefix and key.startswith(prefix):
-                file_name = key[len(prefix):].lstrip('/')
+                file_name = key[len(prefix) :].lstrip("/")
             else:
                 file_name = key
 
             # Format file size
-            size_bytes = file_info['size']
+            size_bytes = file_info["size"]
             total_size += size_bytes
             size_str = self._format_file_size(size_bytes)
 
             # Format timestamp
-            last_modified = file_info['last_modified']
+            last_modified = file_info["last_modified"]
             if isinstance(last_modified, datetime.datetime):
                 time_str = last_modified.strftime("%Y-%m-%d %H:%M:%S")
             else:
                 time_str = str(last_modified)
 
             # Storage class
-            storage_class = file_info.get('storage_class', 'STANDARD')
+            storage_class = file_info.get("storage_class", "STANDARD")
 
             table.add_row(file_name, size_str, time_str, storage_class)
 
@@ -1260,11 +1266,11 @@ class S3Uploader:
             Text("TOTAL", style="bold"),
             Text(self._format_file_size(total_size), style="bold magenta"),
             Text(f"{len(files)} files", style="bold green"),
-            ""
+            "",
         )
 
         console.print(table)
-        
+
         # Also print simple text summary for logs
         self.logger.info(
             f"Listed {len(files)} files in s3://{bucket}/{prefix}, "
@@ -1283,7 +1289,7 @@ class S3Uploader:
         if size_bytes == 0:
             return "0 B"
 
-        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        units = ["B", "KB", "MB", "GB", "TB"]
         unit_index = 0
         size = float(size_bytes)
 
