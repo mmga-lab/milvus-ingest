@@ -158,7 +158,17 @@ class MilvusBulkImporter:
             List of Job IDs for all import tasks
         """
         try:
-            # Try to ensure collection exists
+            # Use import_files if provided, otherwise use files
+            actual_import_files = import_files if import_files is not None else files
+
+            # Log import preparation details
+            self.logger.info(f"Preparing bulk import for collection: {collection_name}")
+            self.logger.info(f"Target Milvus URI: {self.uri}")
+            self.logger.info(f"Database: {self.db_name}")
+            self.logger.info(f"Number of files to import: {len(actual_import_files)}")
+
+            # Try to ensure collection exists BEFORE splitting into batches
+            # This ensures collection is created/dropped only once
             if create_collection:
                 # Try to load metadata from files
                 metadata = self._try_load_metadata(files)
@@ -171,6 +181,10 @@ class MilvusBulkImporter:
                         drop_if_exists=drop_if_exists,
                         use_flat_index=use_flat_index,
                     )
+                    # Wait a bit for collection to be fully ready
+                    if drop_if_exists:
+                        time.sleep(2)  # Give Milvus time to fully recreate the collection
+                        self.logger.info(f"Collection '{collection_name}' recreated, waiting for it to be ready...")
                 else:
                     # Just check if collection exists
                     if not self.client.has_collection(collection_name):
@@ -182,14 +196,6 @@ class MilvusBulkImporter:
                             f"Collection '{collection_name}' does not exist. "
                             "Create it first using 'to-milvus insert' or provide meta.json"
                         )
-            # Use import_files if provided, otherwise use files
-            actual_import_files = import_files if import_files is not None else files
-
-            # Log import preparation details
-            self.logger.info(f"Preparing bulk import for collection: {collection_name}")
-            self.logger.info(f"Target Milvus URI: {self.uri}")
-            self.logger.info(f"Database: {self.db_name}")
-            self.logger.info(f"Number of files to import: {len(actual_import_files)}")
 
             # Split files into batches of max_files_per_batch
             file_batches = []
@@ -224,22 +230,47 @@ class MilvusBulkImporter:
                 # Prepare files as list of lists (each inner list contains one file)
                 batch_file_list = [[f] for f in batch_files]
 
-                # Start bulk import for this batch
+                # Start bulk import for this batch with retry logic
                 self.logger.info(f"Initiating bulk import request for batch {batch_idx}...")
-                resp = bulk_import(
-                    url=self.uri,
-                    collection_name=collection_name,
-                    files=batch_file_list,
-                )
 
-                # Extract job ID from response
-                response_data = resp.json()
-                job_id: str = response_data["data"]["jobId"]
-                job_ids.append(job_id)
+                max_retries = 3
+                retry_count = 0
+                while retry_count < max_retries:
+                    try:
+                        # Check if collection still exists before submitting batch
+                        if not self.client.has_collection(collection_name):
+                            if retry_count < max_retries - 1:
+                                self.logger.warning(f"Collection '{collection_name}' not found, retrying in 3 seconds... (attempt {retry_count + 1}/{max_retries})")
+                                time.sleep(3)
+                                retry_count += 1
+                                continue
+                            else:
+                                raise ValueError(f"Collection '{collection_name}' was dropped or does not exist")
 
-                self.logger.info(f"✓ Batch {batch_idx} import request accepted")
-                self.logger.info(f"  Job ID: {job_id}")
-                self.logger.info(f"  Files in batch: {len(batch_files)}")
+                        resp = bulk_import(
+                            url=self.uri,
+                            collection_name=collection_name,
+                            files=batch_file_list,
+                        )
+
+                        # Extract job ID from response
+                        response_data = resp.json()
+                        job_id: str = response_data["data"]["jobId"]
+                        job_ids.append(job_id)
+
+                        self.logger.info(f"✓ Batch {batch_idx} import request accepted")
+                        self.logger.info(f"  Job ID: {job_id}")
+                        self.logger.info(f"  Files in batch: {len(batch_files)}")
+                        break  # Success, exit retry loop
+
+                    except Exception as e:
+                        if retry_count < max_retries - 1:
+                            self.logger.warning(f"Batch {batch_idx} failed, retrying in 5 seconds... Error: {e}")
+                            time.sleep(5)
+                            retry_count += 1
+                        else:
+                            self.logger.error(f"Batch {batch_idx} failed after {max_retries} attempts: {e}")
+                            raise
 
             self.logger.info("=" * 50)
             self.logger.info(f"All {len(job_ids)} import jobs submitted successfully")
