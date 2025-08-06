@@ -121,12 +121,12 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         string(
             description: 'Partition Count',
             name: 'partition_count',
-            defaultValue: '1024'
+            defaultValue: '128'
         )
         string(
             description: 'Shard Count (VChannels)',
             name: 'shard_count',
-            defaultValue: '16'
+            defaultValue: '2'
         )
         choice(
             description: '''Upload Method Selection:
