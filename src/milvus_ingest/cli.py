@@ -1454,8 +1454,8 @@ def import_to_milvus(
         if not data_files:
             raise ValueError(f"No parquet or json data files found in {local_path}")
 
-        # Start import
-        job_id = importer.bulk_import_files(
+        # Start import (returns list of job IDs if batching is needed)
+        job_ids = importer.bulk_import_files(
             collection_name=final_collection_name,
             files=[str(local_path)],  # For metadata loading
             import_files=data_files,  # S3 file paths
@@ -1463,22 +1463,33 @@ def import_to_milvus(
             create_collection=True,  # Always try to create with metadata
             drop_if_exists=drop_if_exists,
             use_flat_index=not use_autoindex,  # Default to FLAT unless --use-autoindex specified
+            max_files_per_batch=50,  # Max 50 files per batch to avoid large meta requests
         )
 
-        print(f"✓ Import job started: {job_id}")
+        if len(job_ids) == 1:
+            print(f"✓ Import job started: {job_ids[0]}")
+        else:
+            print(f"✓ {len(job_ids)} import jobs started (batched due to {len(data_files)} files)")
+            print(f"✓ Job IDs: {', '.join(job_ids)}")
         print(f"✓ Collection: {final_collection_name}")
 
         # Wait for completion if requested
         if wait:
-            success = importer.wait_for_completion(job_id, timeout=timeout or 300)
+            # Use the new wait_for_multiple_jobs method
+            success = importer.wait_for_multiple_jobs(job_ids, timeout=timeout or 600)
             if success:
-                print("✓ Import completed successfully!")
+                print("✓ All imports completed successfully!")
             else:
                 raise SystemExit(1)
         else:
-            print(
-                f"Import job is running asynchronously. Use job ID {job_id} to check status."
-            )
+            if len(job_ids) == 1:
+                print(
+                    f"Import job is running asynchronously. Use job ID {job_ids[0]} to check status."
+                )
+            else:
+                print(
+                    f"{len(job_ids)} import jobs are running asynchronously. Monitor with job IDs: {', '.join(job_ids)}"
+                )
 
     except Exception as e:
         from .rich_display import display_error
