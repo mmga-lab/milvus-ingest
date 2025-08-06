@@ -8,6 +8,17 @@ image:
     tag: master-latest
     pullPolicy: IfNotPresent
 
+minio:
+  resources:
+    requests:
+      cpu: 2
+      memory: 8Gi
+    limits:
+      cpu: 8
+      memory: 64Gi
+
+
+
 streaming:
   enabled: true
 
