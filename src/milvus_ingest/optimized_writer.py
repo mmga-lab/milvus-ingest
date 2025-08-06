@@ -268,6 +268,7 @@ def determine_generation_strategy(
     Simplified strategy selection for direct parallel file generation:
     - Few files: Direct parallel file generation
     - Many files: Batch-parallel processing
+    - Large files: Memory-aware limitations
 
     Args:
         file_size: Target file size (e.g., "1GB", "512MB")
@@ -278,28 +279,45 @@ def determine_generation_strategy(
     """
     file_size_bytes = _parse_file_size(file_size)
     file_size_mb = file_size_bytes / (1024**2)
+    file_size_gb = file_size_bytes / (1024**3)
     cpu_count = multiprocessing.cpu_count()
+
+    # Determine memory profile based on file size
+    if file_size_gb >= 10:
+        memory_profile = "very_high"
+        max_parallel = 2  # Strict limit for 10GB+ files
+    elif file_size_gb >= 5:
+        memory_profile = "high"
+        max_parallel = min(4, max(3, cpu_count // 2))
+    elif file_size_mb >= 500:
+        memory_profile = "medium"
+        max_parallel = min(cpu_count, 6)
+    else:
+        memory_profile = "low"
+        max_parallel = cpu_count * 2
 
     # Strategy 1: Few files - Direct parallel
     if file_count <= cpu_count * 2:
         return {
             "strategy": "direct_parallel",
             "reason": f"Manageable file count ({file_count}), using direct parallel generation",
-            "max_parallel_files": min(file_count, cpu_count * 2),
-            "memory_profile": "medium" if file_size_mb >= 500 else "low",
-            "optimization": "cpu_bound",
+            "max_parallel_files": min(file_count, max_parallel),
+            "memory_profile": memory_profile,
+            "optimization": "memory_aware" if file_size_gb >= 5 else "cpu_bound",
+            "file_size_gb": file_size_gb,
         }
 
     # Strategy 2: Many files - Batch processing
     else:
-        batch_size = max(10, cpu_count * 2)
+        batch_size = min(max(10, cpu_count * 2), max_parallel * 2)
         return {
             "strategy": "batch_direct_parallel",
             "reason": f"Many files ({file_count}), using batch processing",
             "batch_size": batch_size,
-            "max_parallel_files": cpu_count,
-            "memory_profile": "medium" if file_size_mb >= 500 else "low",
-            "optimization": "throughput_optimized",
+            "max_parallel_files": max_parallel,
+            "memory_profile": memory_profile,
+            "optimization": "memory_aware" if file_size_gb >= 5 else "throughput_optimized",
+            "file_size_gb": file_size_gb,
         }
 
 
@@ -436,44 +454,60 @@ def adjust_workers_by_strategy(
     file_size_gb = file_size_bytes / (1024**3)
     cpu_count = multiprocessing.cpu_count()
 
-    # Strategy-based worker adjustment
-    if strategy == "direct_parallel":
-        # For direct parallel: use strategy recommendation
-        recommended_workers = strategy_info.get("max_parallel_files", num_workers)
-        adjusted_workers = min(num_workers, recommended_workers)
-
-    elif strategy == "batch_direct_parallel":
-        # For batch direct: limit workers but allow higher throughput
-        max_workers = strategy_info.get("max_parallel_files", cpu_count * 2)
-        adjusted_workers = min(num_workers, max_workers)
-
-    elif strategy == "batch_file_parallel":
-        # For batch file processing: use batch-optimized workers
-        batch_size = strategy_info.get("batch_size", cpu_count)
-        max_workers = strategy_info.get("max_parallel_files", cpu_count)
-        adjusted_workers = min(num_workers, max_workers)
-
+    # Enhanced memory-aware worker adjustment based on file size
+    # Critical for preventing memory exhaustion with large files
+    if file_size_gb >= 10:
+        # 10GB+ files: Strictly limit to 2 workers to prevent memory exhaustion
+        # Each 10GB file can use 14GB+ memory with Python object overhead
+        adjusted_workers = min(num_workers, 2)
+        logger.warning(
+            f"⚠️ Large file detected ({file_size_gb:.1f}GB): Limiting workers to {adjusted_workers} to prevent memory exhaustion"
+        )
+    elif file_size_gb >= 5:
+        # 5-10GB files: Allow 3-4 workers based on available CPUs
+        adjusted_workers = min(num_workers, min(4, max(3, cpu_count // 2)))
+        logger.info(
+            f"Large file detected ({file_size_gb:.1f}GB): Adjusting workers to {adjusted_workers}"
+        )
+    elif file_size_gb >= 2:
+        # 2-5GB files: Moderate limitation
+        adjusted_workers = min(num_workers, min(6, cpu_count))
     else:
-        # Fallback: use original size-based logic
-        if file_size_gb >= 5:
-            adjusted_workers = 1
-        elif file_size_gb >= 2:
-            adjusted_workers = min(num_workers, 2)
+        # <2GB files: Use strategy-based recommendation
+        if strategy == "direct_parallel":
+            # For direct parallel: use strategy recommendation
+            recommended_workers = strategy_info.get("max_parallel_files", num_workers)
+            adjusted_workers = min(num_workers, recommended_workers)
+
+        elif strategy == "batch_direct_parallel":
+            # For batch direct: limit workers but allow higher throughput
+            max_workers = strategy_info.get("max_parallel_files", cpu_count * 2)
+            adjusted_workers = min(num_workers, max_workers)
+
+        elif strategy == "batch_file_parallel":
+            # For batch file processing: use batch-optimized workers
+            batch_size = strategy_info.get("batch_size", cpu_count)
+            max_workers = strategy_info.get("max_parallel_files", cpu_count)
+            adjusted_workers = min(num_workers, max_workers)
+
         else:
+            # Fallback: use CPU count
             adjusted_workers = num_workers
 
     # Log strategy and adjustment
     if adjusted_workers != num_workers:
         logger.info(
-            f"Strategy-based worker adjustment: {num_workers} → {adjusted_workers} "
-            f"(strategy: {strategy}, memory: {memory_profile}, file: {file_size_gb:.1f}GB)"
+            f"Worker adjustment: {num_workers} → {adjusted_workers} "
+            f"(strategy: {strategy}, memory: {memory_profile}, file: {file_size_gb:.1f}GB × {file_count} files)"
         )
 
-    # Additional memory safety warnings
-    if memory_profile == "high" and adjusted_workers > 2:
+    # Additional memory safety warnings for multiple large files
+    total_memory_estimate_gb = file_size_gb * adjusted_workers * 1.4  # 1.4x for Python overhead
+    if total_memory_estimate_gb > 100:
         logger.warning(
-            f"High memory profile detected. Using {adjusted_workers} workers for "
-            f"{file_count}×{file_size_gb:.1f}GB files. Monitor memory usage."
+            f"⚠️ High memory usage expected: ~{total_memory_estimate_gb:.0f}GB "
+            f"({adjusted_workers} workers × {file_size_gb:.1f}GB files). "
+            f"Consider using --workers 2 or smaller --file-size"
         )
     # chunk_parallel_optimized removed - no longer supported
 
