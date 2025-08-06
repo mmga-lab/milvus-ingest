@@ -140,8 +140,9 @@ class MilvusBulkImporter:
         create_collection: bool = True,
         drop_if_exists: bool = False,
         use_flat_index: bool = True,
-    ) -> str:
-        """Start bulk import job.
+        max_files_per_batch: int = 50,
+    ) -> list[str]:
+        """Start bulk import jobs with batching support.
 
         Args:
             collection_name: Target collection name
@@ -151,9 +152,10 @@ class MilvusBulkImporter:
             create_collection: Try to create collection if it doesn't exist
             drop_if_exists: Drop collection if it already exists
             use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall)
+            max_files_per_batch: Maximum number of files per import request (default: 50)
 
         Returns:
-            Job ID for the import task
+            List of Job IDs for all import tasks
         """
         try:
             # Try to ensure collection exists
@@ -189,53 +191,218 @@ class MilvusBulkImporter:
             self.logger.info(f"Database: {self.db_name}")
             self.logger.info(f"Number of files to import: {len(actual_import_files)}")
 
-            # Log file details
-            for i, file_path in enumerate(actual_import_files, 1):
-                file_ext = (
-                    ".parquet"
-                    if file_path.endswith(".parquet")
-                    else ".json"
-                    if file_path.endswith(".json")
-                    else "unknown"
-                )
-                if file_path.startswith("s3://"):
-                    self.logger.info(f"File {i}: {file_path} ({file_ext}, S3/MinIO)")
-                else:
-                    # For relative paths, just show the filename
-                    self.logger.info(
-                        f"File {i}: {file_path} ({file_ext}, relative to bucket)"
+            # Split files into batches of max_files_per_batch
+            file_batches = []
+            for i in range(0, len(actual_import_files), max_files_per_batch):
+                batch = actual_import_files[i:i + max_files_per_batch]
+                file_batches.append(batch)
+
+            self.logger.info(f"Split {len(actual_import_files)} files into {len(file_batches)} batches (max {max_files_per_batch} files per batch)")
+
+            # Submit all import jobs
+            job_ids = []
+            for batch_idx, batch_files in enumerate(file_batches, 1):
+                self.logger.info(f"Submitting batch {batch_idx}/{len(file_batches)} with {len(batch_files)} files")
+
+                # Log file details for this batch
+                for i, file_path in enumerate(batch_files, 1):
+                    file_ext = (
+                        ".parquet"
+                        if file_path.endswith(".parquet")
+                        else ".json"
+                        if file_path.endswith(".json")
+                        else "unknown"
                     )
+                    if file_path.startswith("s3://"):
+                        self.logger.debug(f"  File {i}: {file_path} ({file_ext}, S3/MinIO)")
+                    else:
+                        # For relative paths, just show the filename
+                        self.logger.debug(
+                            f"  File {i}: {file_path} ({file_ext}, relative to bucket)"
+                        )
 
-            # Prepare files as list of lists (each inner list is a batch)
-            file_batches = [[f] for f in actual_import_files]
-            self.logger.info(f"Organized files into {len(file_batches)} import batches")
+                # Prepare files as list of lists (each inner list contains one file)
+                batch_file_list = [[f] for f in batch_files]
 
-            # Start bulk import using bulk_writer
-            self.logger.info("Initiating bulk import request to Milvus...")
-            resp = bulk_import(
-                url=self.uri,
-                collection_name=collection_name,
-                files=file_batches,
-            )
+                # Start bulk import for this batch
+                self.logger.info(f"Initiating bulk import request for batch {batch_idx}...")
+                resp = bulk_import(
+                    url=self.uri,
+                    collection_name=collection_name,
+                    files=batch_file_list,
+                )
 
-            # Extract job ID from response
-            response_data = resp.json()
-            job_id: str = response_data["data"]["jobId"]
+                # Extract job ID from response
+                response_data = resp.json()
+                job_id: str = response_data["data"]["jobId"]
+                job_ids.append(job_id)
 
-            self.logger.info("✓ Bulk import request accepted successfully")
-            self.logger.info(f"Job ID: {job_id}")
+                self.logger.info(f"✓ Batch {batch_idx} import request accepted")
+                self.logger.info(f"  Job ID: {job_id}")
+                self.logger.info(f"  Files in batch: {len(batch_files)}")
+
+            self.logger.info("=" * 50)
+            self.logger.info(f"All {len(job_ids)} import jobs submitted successfully")
             self.logger.info(f"Collection: {collection_name}")
-            self.logger.info(
-                "Status: Import job queued and will be processed asynchronously"
-            )
+            self.logger.info(f"Total files: {len(actual_import_files)}")
+            self.logger.info(f"Job IDs: {', '.join(job_ids)}")
+            self.logger.info("=" * 50)
 
-            return job_id
+            return job_ids
 
         except Exception as e:
             self.logger.error(f"Failed to start bulk import: {e}")
             self.logger.error(f"Collection: {collection_name}")
             self.logger.error(f"Files: {files}")
             raise
+
+    def wait_for_multiple_jobs(
+        self,
+        job_ids: list[str],
+        timeout: int = 600,
+        show_progress: bool = True,
+    ) -> bool:
+        """Wait for multiple bulk import jobs to complete.
+
+        Args:
+            job_ids: List of import job IDs
+            timeout: Timeout in seconds for all jobs
+            show_progress: Show progress bar
+
+        Returns:
+            True if all imports completed successfully
+        """
+        if not job_ids:
+            self.logger.warning("No job IDs provided")
+            return True
+
+        if len(job_ids) == 1:
+            # For single job, use the original method
+            return self.wait_for_completion(job_ids[0], timeout, show_progress)
+
+        start_time = time.time()
+        total_jobs = len(job_ids)
+        completed_jobs = set()
+        failed_jobs = set()
+
+        self.logger.info(f"⏳ Waiting for {total_jobs} import jobs to complete (timeout: {timeout}s)...")
+        print(f"⏳ Monitoring {total_jobs} import jobs...")
+
+        last_log_time = 0.0
+
+        while time.time() - start_time < timeout:
+            # Check status of all pending jobs
+            pending_jobs = [jid for jid in job_ids if jid not in completed_jobs and jid not in failed_jobs]
+
+            if not pending_jobs:
+                # All jobs are done
+                break
+
+            # Collect status for all pending jobs
+            job_statuses = {}
+            total_imported_rows = 0
+            total_rows_all_jobs = 0
+
+            for job_id in pending_jobs:
+                try:
+                    resp = get_import_progress(
+                        url=self.uri,
+                        job_id=job_id,
+                    )
+                    job_info = resp.json()["data"]
+                    state = job_info.get("state", "unknown")
+                    progress_percent = job_info.get("progress", 0)
+                    imported_rows = job_info.get("importedRows", 0)
+                    total_rows = job_info.get("totalRows", 0)
+
+                    job_statuses[job_id] = {
+                        "state": state,
+                        "progress": progress_percent,
+                        "imported_rows": imported_rows,
+                        "total_rows": total_rows,
+                    }
+
+                    total_imported_rows += imported_rows
+                    total_rows_all_jobs += total_rows
+
+                    # Check if job completed or failed
+                    if state in ["ImportCompleted", "Completed"]:
+                        completed_jobs.add(job_id)
+                        self.logger.info(f"✅ Job {job_id} completed ({len(completed_jobs)}/{total_jobs})")
+                    elif state in ["ImportFailed", "Failed"]:
+                        failed_jobs.add(job_id)
+                        reason = job_info.get("reason", "Unknown error")
+                        self.logger.error(f"❌ Job {job_id} failed: {reason}")
+
+                except Exception as e:
+                    self.logger.error(f"Failed to get status for job {job_id}: {e}")
+
+            # Log progress every 10 seconds
+            elapsed = time.time() - start_time
+            if elapsed - last_log_time >= 10 or len(completed_jobs) + len(failed_jobs) == total_jobs:
+                # Calculate overall progress
+                overall_progress = (len(completed_jobs) + len(failed_jobs)) / total_jobs * 100
+
+                print(f"📊 Overall progress: {overall_progress:.1f}% | Completed: {len(completed_jobs)}/{total_jobs} | Failed: {len(failed_jobs)} | Rows: {total_imported_rows:,}/{total_rows_all_jobs:,} | Time: {elapsed:.1f}s")
+
+                self.logger.info("=" * 50)
+                self.logger.info("Import batch progress update:")
+                self.logger.info(f"  Completed jobs: {len(completed_jobs)}/{total_jobs}")
+                self.logger.info(f"  Failed jobs: {len(failed_jobs)}")
+                self.logger.info(f"  Pending jobs: {len(pending_jobs)}")
+                self.logger.info(f"  Total rows imported: {total_imported_rows:,} / {total_rows_all_jobs:,}")
+                self.logger.info(f"  Elapsed time: {elapsed:.1f}s")
+
+                # Log individual job statuses
+                if pending_jobs and len(pending_jobs) <= 10:  # Only show details for small number of jobs
+                    self.logger.info("  Pending job statuses:")
+                    for job_id in pending_jobs[:10]:
+                        if job_id in job_statuses:
+                            status = job_statuses[job_id]
+                            self.logger.info(f"    {job_id}: {status['state']} ({status['progress']}%)")
+
+                last_log_time = elapsed
+
+            # Check if all jobs are done
+            if len(completed_jobs) + len(failed_jobs) == total_jobs:
+                break
+
+            time.sleep(3)  # Check every 3 seconds for multiple jobs
+
+        # Final summary
+        elapsed = time.time() - start_time
+
+        if len(failed_jobs) > 0:
+            print(f"❌ {len(failed_jobs)} import job(s) failed")
+            self.logger.error("=" * 50)
+            self.logger.error("Import batch completed with failures")
+            self.logger.error(f"  Total jobs: {total_jobs}")
+            self.logger.error(f"  Successful: {len(completed_jobs)}")
+            self.logger.error(f"  Failed: {len(failed_jobs)}")
+            self.logger.error(f"  Failed job IDs: {', '.join(failed_jobs)}")
+            self.logger.error(f"  Total time: {elapsed:.2f}s")
+            return False
+        elif len(completed_jobs) == total_jobs:
+            print(f"✅ All {total_jobs} import jobs completed successfully!")
+            self.logger.info("=" * 50)
+            self.logger.info("🎉 All import jobs completed successfully!")
+            self.logger.info(f"  Total jobs: {total_jobs}")
+            self.logger.info(f"  Total time: {elapsed:.2f}s")
+            if elapsed > 0:
+                rate = total_jobs / elapsed * 60
+                self.logger.info(f"  Processing rate: {rate:.1f} jobs/minute")
+            return True
+        else:
+            # Timeout
+            pending_count = total_jobs - len(completed_jobs) - len(failed_jobs)
+            print(f"⏰ Import timeout - {pending_count} job(s) still pending")
+            self.logger.error("=" * 50)
+            self.logger.error(f"⏰ Import batch timeout after {timeout} seconds")
+            self.logger.error(f"  Total jobs: {total_jobs}")
+            self.logger.error(f"  Completed: {len(completed_jobs)}")
+            self.logger.error(f"  Failed: {len(failed_jobs)}")
+            self.logger.error(f"  Pending: {pending_count}")
+            return False
 
     def wait_for_completion(
         self,
