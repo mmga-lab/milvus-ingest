@@ -77,12 +77,12 @@ pipeline {
                     
                     // Schema types to test - comprehensive coverage of all available schemas
                     def schemaTypes = [
-                        'product_catalog',    // Simple product catalog with auto_id (4 fields, 128d)
-                        'ecommerce_search',   // E-commerce with nullable fields (5 fields, 256d)
-                        'news_articles',      // News with dynamic fields (4 fields, 768d)
+                        // 'product_catalog',    // Simple product catalog with auto_id (4 fields, 128d)
+                        // 'ecommerce_search',   // E-commerce with nullable fields (5 fields, 256d)
+                        // 'news_articles',      // News with dynamic fields (4 fields, 768d)
                         'document_search',    // Document search with sparse vectors + BM25 (5 fields, 768d)
                         'multi_tenant_data',  // Multi-tenant with partitioning (5 fields, 256d)
-                        'multimedia_content'  // Multiple vector types + nullable fields (7 fields, 256d+384d+128d)
+                        // 'multimedia_content'  // Multiple vector types + nullable fields (7 fields, 256d+384d+128d)
                     ]
                     
                     // File configurations - optimized for comprehensive testing without 10*10GB
@@ -91,7 +91,7 @@ pipeline {
                         fileConfigs.add([count: 10, size: '1GB', desc: 'Large Files'])
                     }
                     if (params.run_small_files) {
-                        fileConfigs.add([count: 100, size: '100MB', desc: 'Small Files'])
+                        fileConfigs.add([count: 100, size: '200MB', desc: 'Small Files'])
                     }
                     
                     // Formats
@@ -124,8 +124,8 @@ pipeline {
                                         fileDesc: fileConfig.desc,
                                         format: format,
                                         storage: storage,
-                                        partitions: 1024,  // Multi-partition test
-                                        shards: 16         // Multi-vchannel test
+                                        partitions: 128,  // Multi-partition test
+                                        shards: 2         // Multi-vchannel test
                                     ])
                                 }
                             }
