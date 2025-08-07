@@ -29,18 +29,20 @@ indexNode:
 dataNode:
   resources:
     requests:
-      cpu: 2
+      cpu: 4
+      memory: 16Gi
     limits:
-      cpu: 16
-      memory: 32Gi
+      cpu: 4
+      memory: 16Gi
 
 queryNode:
   resources:
     requests:
-      cpu: 2
+      cpu: 4
+      memory: 16Gi
     limits:
-      cpu: 16
-      memory: 32Gi
+      cpu: 4
+      memory: 16Gi
 
 
 kafka:
