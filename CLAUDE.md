@@ -108,7 +108,6 @@ milvus-ingest to-milvus verify ./output --level scalar   # Business data accurac
 milvus-ingest to-milvus verify ./output --level full     # Complete validation
 ```
 
-
 ## Architecture Overview
 
 ### Core Components

@@ -30,7 +30,7 @@
 
 ```bash
 # Install from source (recommended for development)
-git clone https://github.com/zilliz/milvus-ingest.git
+git clone https://github.com/mmga-lab/milvus-ingest.git
 cd milvus-ingest
 pdm install  # Installs with development dependencies
 
@@ -52,10 +52,10 @@ Get started instantly with pre-built schemas optimized for large-scale generatio
 milvus-ingest schema list
 
 # Generate data using a built-in schema (high-performance by default)
-milvus-ingest generate --builtin simple --total-rows 100000 --preview
+milvus-ingest generate --builtin product_catalog --total-rows 100000 --preview
 
 # Generate large e-commerce dataset with automatic file partitioning
-milvus-ingest generate --builtin ecommerce --total-rows 2500000 --out products/
+milvus-ingest generate --builtin ecommerce_search --total-rows 2500000 --out products/
 
 # Import to Milvus and verify data integrity
 milvus-ingest to-milvus insert ./products/ --uri http://localhost:19530
@@ -65,18 +65,12 @@ milvus-ingest to-milvus verify ./products/ --level scalar --uri http://localhost
 **Available Built-in Schemas:**
 | Schema | Description | Use Cases |
 |--------|-------------|-----------|
-| `simple` | Basic example with common field types | Learning, testing |
-| `ecommerce` | Product catalog with search embeddings | Online stores, recommendations |
-| `documents` | Document search with semantic embeddings | Knowledge bases, document search |
-| `images` | Image gallery with visual similarity | Media platforms, image search |
-| `users` | User profiles with behavioral embeddings | User analytics, personalization |
-| `videos` | Video library with multimodal embeddings | Video platforms, content discovery |
-| `news` | News articles with sentiment analysis | News aggregation, content analysis |
-| `audio_transcripts` | Audio transcription with FP16 embeddings | Speech-to-text search, podcasts |
-| `ai_conversations` | AI chat history with BF16 embeddings | Chatbot analytics, conversation search |
-| `face_recognition` | Facial recognition with binary vectors | Security systems, identity verification |
-| `ecommerce_partitioned` | Partitioned e-commerce schema | Scalable product catalogs |
-| `cardinality_demo` | Schema demonstrating cardinality features | Testing cardinality constraints |
+| `product_catalog` | Simple product catalog with auto_id | Learning, Basic product search, Auto ID demonstration |
+| `ecommerce_search` | E-commerce product search with nullable fields | Product search, E-commerce, Nullable field handling |
+| `news_articles` | News article storage with dynamic fields | News search, Dynamic schema, Content management |
+| `document_search` | Document search with sparse vectors and BM25 | Sparse vector search, BM25 functions, Hybrid search |
+| `multi_tenant_data` | Multi-tenant customer support system with partitioning | Multi-tenant SaaS, Partition keys, Support tickets |
+| `multimedia_content` | Multimedia content with multiple vector types | Media search, Multiple vector types, Default values |
 
 ### 2. Create Custom Schemas
 
@@ -147,7 +141,7 @@ all_schemas = manager.list_all_schemas()
 print("Available schemas:", list(all_schemas.keys()))
 
 # Load any schema (built-in or custom)
-schema = manager.get_schema("ecommerce")  # Built-in
+schema = manager.get_schema("ecommerce_search")  # Built-in
 # schema = manager.get_schema("my_products")  # Custom
 
 # Generate data from schema file
@@ -284,7 +278,7 @@ milvus-ingest clean [options]     # Utility commands
 | Command | Description | Example |
 |---------|-------------|---------|
 | `--schema PATH` | Generate from custom schema file | `milvus-ingest generate --schema my_schema.json` |
-| `--builtin SCHEMA_ID` | Use built-in or managed schema | `milvus-ingest generate --builtin ecommerce` |
+| `--builtin SCHEMA_ID` | Use built-in or managed schema | `milvus-ingest generate --builtin ecommerce_search` |
 | `--total-rows INTEGER` | Total number of rows to generate | `milvus-ingest generate --total-rows 5000` |
 | `--format FORMAT` | Output format (parquet, json) | `milvus-ingest generate --format json` |
 | `--out DIRECTORY` | Output directory path | `milvus-ingest generate --out my_data/` |
@@ -322,23 +316,23 @@ milvus-ingest clean [options]     # Utility commands
 
 ```bash
 # Quick start with built-in schema (high-performance by default)
-milvus-ingest generate --builtin simple --total-rows 100000 --preview
+milvus-ingest generate --builtin product_catalog --total-rows 100000 --preview
 
 # Generate massive datasets with automatic file partitioning 
-milvus-ingest generate --builtin ecommerce --total-rows 5000000 --format parquet --out products/
+milvus-ingest generate --builtin ecommerce_search --total-rows 5000000 --format parquet --out products/
 
 # Test custom schema validation
 milvus-ingest generate --schema my_schema.json --validate-only
 
 # Reproducible large-scale data generation
-milvus-ingest generate --builtin users --total-rows 2000000 --seed 42 --out users/
+milvus-ingest generate --builtin multi_tenant_data --total-rows 2000000 --seed 42 --out users/
 
 # Control file partitioning (smaller files for easier handling)
-milvus-ingest generate --builtin ecommerce --total-rows 5000000 --file-size 128MB --rows-per-file 500000
+milvus-ingest generate --builtin ecommerce_search --total-rows 5000000 --file-size 128MB --rows-per-file 500000
 
 # Schema management workflow
 milvus-ingest schema list
-milvus-ingest schema show ecommerce
+milvus-ingest schema show ecommerce_search
 milvus-ingest schema add my_ecommerce ecommerce_base.json
 
 # Clean up generated output files
@@ -353,7 +347,7 @@ Insert generated data directly into Milvus with automatic collection creation:
 
 ```bash
 # Generate data first
-milvus-ingest generate --builtin ecommerce --total-rows 100000 --out products/
+milvus-ingest generate --builtin ecommerce_search --total-rows 100000 --out products/
 
 # Insert to local Milvus (default: localhost:19530)
 milvus-ingest to-milvus insert ./products/
@@ -488,7 +482,7 @@ milvus-ingest upload ./output s3://my-bucket/data/ \
 
 ```bash
 # 1. Generate large dataset
-milvus-ingest generate --builtin ecommerce --rows 5000000 --out products/
+milvus-ingest generate --builtin ecommerce_search --total-rows 5000000 --out products/
 
 # 2. Option A: Direct insert (for smaller datasets)
 milvus-ingest to-milvus insert ./products/ \
@@ -543,7 +537,7 @@ This project uses PDM for dependency management and follows modern Python develo
 
 ```bash
 # Clone and setup
-git clone https://github.com/your-org/milvus-ingest.git
+git clone https://github.com/mmga-lab/milvus-ingest.git
 cd milvus-ingest
 pdm install  # Install development dependencies
 ```

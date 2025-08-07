@@ -1,4 +1,4 @@
-# Milvus Fake Data - 命令行工具文档
+# Milvus Ingest - 命令行工具文档
 
 这是 milvus-ingest 命令行工具的完整使用文档，涵盖所有命令和选项的详细说明。
 
@@ -9,7 +9,7 @@
 - [**generate**](commands/generate.md) - 生成模拟数据
 - [**schema**](commands/schema.md) - 模式管理 
 - [**upload**](commands/upload.md) - 上传到 S3/MinIO
-- [**to-milvus**](commands/to-milvus.md) - Milvus 集成 (insert/import)
+- [**to-milvus**](commands/to-milvus.md) - Milvus 集成 (insert/import/verify)
 - [**clean**](commands/clean.md) - 清理生成的文件
 
 ### 教程和示例
@@ -27,16 +27,16 @@
 
 ```bash
 # 快速生成数据预览
-milvus-ingest generate --builtin simple --total-rows 1000 --preview
+milvus-ingest generate --builtin product_catalog --total-rows 1000 --preview
 
 # 生成大规模数据集（Parquet格式）
-milvus-ingest generate --builtin ecommerce --total-rows 1000000 --out ./data
+milvus-ingest generate --builtin ecommerce_search --total-rows 1000000 --out ./data
 
 # 生成JSON格式数据（便于调试）
-milvus-ingest generate --builtin simple --total-rows 10000 --format json --out ./json_data
+milvus-ingest generate --builtin product_catalog --total-rows 10000 --format json --out ./json_data
 
 # 生成带动态字段的数据
-milvus-ingest generate --builtin dynamic_example --total-rows 5000 --format json --out ./dynamic_data
+milvus-ingest generate --builtin news_articles --total-rows 5000 --format json --out ./dynamic_data
 
 # 查看所有可用模式
 milvus-ingest schema list
@@ -69,15 +69,12 @@ milvus-ingest generate --builtin simple --total-rows 10000
 ```
 
 **可用的内置模式：**
-- `simple` - 基础示例模式
-- `ecommerce` - 电商产品目录
-- `documents` - 文档搜索
-- `images` - 图像库
-- `users` - 用户档案
-- `videos` - 视频库
-- `news` - 新闻文章
-- `dynamic_example` - 动态字段示例
-- 等等...
+- `product_catalog` - 产品目录（入门推荐）
+- `ecommerce_search` - 电商搜索（包含可空字段）
+- `news_articles` - 新闻文章（支持动态字段）
+- `document_search` - 文档搜索（稀疏向量+BM25）
+- `multi_tenant_data` - 多租户数据（分区支持）
+- `multimedia_content` - 多媒体内容（多种向量类型）
 
 ### 2. 自定义模式
 使用 JSON/YAML 文件定义自己的数据结构：

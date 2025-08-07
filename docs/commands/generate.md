@@ -15,26 +15,19 @@ milvus-ingest generate [OPTIONS]
 
 ```bash
 # 使用内置模式
-milvus-ingest generate --builtin simple --total-rows 1000
+milvus-ingest generate --builtin product_catalog --total-rows 1000
 
 # 使用自定义管理模式  
 milvus-ingest generate --builtin my_products --total-rows 1000
 ```
 
 **可用的内置模式:**
-- `simple` - 基础示例 (id, text, vector)
-- `ecommerce` - 电商产品目录 (产品信息、价格、评分、搜索向量)
-- `documents` - 文档搜索 (标题、内容、语义向量) 
-- `images` - 图像库 (元数据、特征向量)
-- `users` - 用户档案 (个人信息、行为向量)
-- `videos` - 视频库 (视频信息、多模态向量)
-- `news` - 新闻文章 (新闻内容、情感分析)
-- `audio_transcripts` - 音频转录 (语音文本、FP16向量)
-- `ai_conversations` - AI对话 (聊天记录、BF16向量)
-- `face_recognition` - 人脸识别 (人脸特征、二进制向量)
-- `ecommerce_partitioned` - 分区电商模式
-- `cardinality_demo` - 基数约束演示
-- `dynamic_example` - 动态字段演示
+- `product_catalog` - 产品目录 (带auto_id的基础示例)
+- `ecommerce_search` - 电商搜索 (包含可空字段的产品搜索)
+- `news_articles` - 新闻文章 (支持动态字段的新闻内容)
+- `document_search` - 文档搜索 (稀疏向量+BM25的文档检索)
+- `multi_tenant_data` - 多租户数据 (带分区的多租户系统)
+- `multimedia_content` - 多媒体内容 (多种向量类型的媒体库)
 
 ### --schema PATH
 使用自定义模式文件 (JSON/YAML)
@@ -51,13 +44,13 @@ milvus-ingest generate --schema my_schema.yaml --total-rows 1000
 
 ```bash
 # 小规模测试
-milvus-ingest generate --builtin simple --total-rows 1000
+milvus-ingest generate --builtin product_catalog --total-rows 1000
 
 # 中等规模
-milvus-ingest generate --builtin ecommerce --total-rows 100000
+milvus-ingest generate --builtin ecommerce_search --total-rows 100000
 
 # 大规模数据集
-milvus-ingest generate --builtin ecommerce --total-rows 5000000
+milvus-ingest generate --builtin ecommerce_search --total-rows 5000000
 ```
 
 ### --out DIRECTORY  
