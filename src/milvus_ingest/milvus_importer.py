@@ -140,7 +140,7 @@ class MilvusBulkImporter:
         create_collection: bool = True,
         drop_if_exists: bool = False,
         use_flat_index: bool = True,
-        max_files_per_batch: int = 200,
+        max_files_per_batch: int = 250,
     ) -> list[str]:
         """Start bulk import jobs with batching support.
 
