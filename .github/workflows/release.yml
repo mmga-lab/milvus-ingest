@@ -70,12 +70,12 @@ jobs:
 
       - name: Test CLI
         run: |
-          milvus-fake-data --help
+          milvus-ingest --help
 
       - name: Test basic functionality
         run: |
           echo '{"collection_name": "test_collection", "fields": [{"name": "id", "type": "Int64", "is_primary": true}, {"name": "text", "type": "VarChar", "max_length": 100}]}' > test_schema.json
-          milvus-fake-data --schema test_schema.json --validate-only
+          milvus-ingest generate --schema test_schema.json --validate-only
 
   publish-pypi:
     name: Publish to PyPI
@@ -84,7 +84,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     environment:
       name: pypi
-      url: https://pypi.org/p/milvus-fake-data
+      url: https://pypi.org/p/milvus-ingest
     permissions:
       id-token: write
 
