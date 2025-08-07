@@ -1,12 +1,51 @@
 [project]
 name = "milvus-ingest"
 version = "0.1.2"
-description = "High-performance data ingestion tool for Milvus vector database with vectorized operations"
-keywords = ["milvus", "vector-database", "data-ingestion", "bulk-import", "data-generation", "high-performance", "vectorization", "etl"]
-classifiers = ["Development Status :: 4 - Beta", "Intended Audience :: Developers", "License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Topic :: Database", "Topic :: Software Development :: Testing", "Topic :: Scientific/Engineering", "Topic :: System :: Benchmark", "Operating System :: OS Independent"]
-dependencies = ["faker>=23.0.0", "numpy>=1.24.0", "pandas>=2.0.0", "pyarrow>=14.0.0", "click>=8.0.0", "pyyaml>=6.0.0", "pymilvus[bulk_writer]", "pydantic>=2.0.0", "rich>=13.0.0", "loguru>=0.7.3", "boto3>=1.28.0", "ml-dtypes>=0.5.1"]
+description = "High-performance data ingestion tool for Milvus vector database with vectorized operations, schema management, and comprehensive data verification"
+keywords = ["milvus", "vector-database", "data-ingestion", "bulk-import", "data-generation", "high-performance", "vectorization", "etl", "schema-management", "data-verification"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Benchmark",
+    "Topic :: Utilities",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Typing :: Typed",
+]
+dependencies = [
+    "faker>=23.0.0",
+    "numpy>=1.24.0", 
+    "pandas>=2.0.0",
+    "pyarrow>=14.0.0",
+    "click>=8.0.0",
+    "pyyaml>=6.0.0",
+    "pymilvus[bulk_writer]",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "loguru>=0.7.3",
+    "boto3>=1.28.0",
+    "ml-dtypes>=0.5.1",
+]
 requires-python = ">=3.10"
 readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/mmga-lab/milvus-ingest"
+Repository = "https://github.com/mmga-lab/milvus-ingest"
+Documentation = "https://github.com/mmga-lab/milvus-ingest/blob/main/docs/README.md"
+Issues = "https://github.com/mmga-lab/milvus-ingest/issues"
 
 [[project.authors]]
 name = "zhuwenxing"

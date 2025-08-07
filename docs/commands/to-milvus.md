@@ -14,6 +14,7 @@ milvus-ingest to-milvus <SUBCOMMAND> [OPTIONS]
 |--------|------|----------|----------|
 | `insert` | 直接插入数据 | 中小规模数据集 (<1M 行) | 同步操作，实时反馈 |
 | `import` | 批量导入数据 | 大规模数据集 (>1M 行) | 异步操作，高性能 |
+| `verify` | 验证数据完整性 | 导入后的数据验证 | 3级验证，支持查询测试 |
 
 ---
 
@@ -543,6 +544,308 @@ milvus-ingest to-milvus insert ./data 2>&1 | tee import.log
 - [`generate`](generate.md) - 生成需要导入的数据
 - [`upload`](upload.md) - 上传数据到 S3/MinIO（用于 import 模式）
 - [`schema`](schema.md) - 管理数据模式
+
+---
+
+## verify - 数据完整性验证
+
+验证 Milvus 集合中的数据是否与原始生成的数据匹配，支持多级验证和查询功能测试。
+
+### 语法
+```bash
+milvus-ingest to-milvus verify DATA_PATH [OPTIONS]
+```
+
+### 必需参数
+- `DATA_PATH`: 原始数据目录路径（包含 meta.json 的目录）
+
+### 验证级别选项
+
+#### --level {count|scalar|full}
+设置验证级别（默认: count）
+
+```bash
+# Level 1: 行数验证 + 查询测试（默认，最快）
+milvus-ingest to-milvus verify ./data --level count
+
+# Level 2: 标量字段验证 + 查询测试（排除向量字段）
+milvus-ingest to-milvus verify ./data --level scalar
+
+# Level 3: 完整验证 + 查询测试（包含向量字段）
+milvus-ingest to-milvus verify ./data --level full
+```
+
+**验证级别对比:**
+
+| 级别 | 验证内容 | 适用场景 | 验证速度 |
+|------|----------|----------|----------|
+| `count` | 行数统计 + 查询/搜索测试 | 快速验证导入是否成功 | 最快（几秒） |
+| `scalar` | 标量字段数据 + 查询/搜索测试 | 业务数据准确性验证 | 中等（几分钟） |
+| `full` | 所有字段数据 + 查询/搜索测试 | 完整数据质量保证 | 较慢（几十分钟） |
+
+### 连接选项
+
+#### --uri URI
+Milvus 服务器地址（默认: http://localhost:19530）
+
+```bash
+# 验证远程 Milvus 数据
+milvus-ingest to-milvus verify ./data \
+  --uri http://192.168.1.100:19530 \
+  --level scalar
+```
+
+#### --token TOKEN
+认证令牌
+
+```bash
+# Milvus Cloud 验证
+milvus-ingest to-milvus verify ./data \
+  --uri https://cluster.vectordb.zillizcloud.com \
+  --token your_api_token \
+  --level full
+```
+
+#### --db-name DATABASE
+数据库名称（默认: default）
+
+```bash
+# 指定数据库验证
+milvus-ingest to-milvus verify ./data \
+  --db-name production \
+  --collection-name products \
+  --level scalar
+```
+
+### 集合配置选项
+
+#### --collection-name NAME
+覆盖集合名称（默认使用 meta.json 中的名称）
+
+```bash
+# 验证特定名称的集合
+milvus-ingest to-milvus verify ./data \
+  --collection-name custom_collection_name \
+  --level full
+```
+
+### 验证功能特点
+
+#### 1. 渐进式验证
+每个级别都包含前一级别的所有验证内容：
+- **count**: 基础行数统计
+- **scalar**: count + 标量字段值匹配
+- **full**: scalar + 向量字段值匹配
+
+#### 2. 查询功能测试
+所有验证级别都包含查询功能测试：
+- **1000次精确查询测试**: 验证数据检索功能（成功率>95%）
+- **1000次向量搜索测试**: 验证相似度搜索功能（成功率>80%）
+- **功能验证**: 确保导入的数据不仅存在，还能正常查询
+
+#### 3. 智能字段处理
+- **AUTO_ID 跳过**: 自动跳过 auto_id 字段的值验证
+- **浮点数容差**: 使用 1e-6 容差进行浮点数比较
+- **向量精度处理**: 支持 Float16、BFloat16 等特殊向量类型
+- **错误容忍**: 允许最多5%的数据不匹配（浮点精度问题）
+
+### 完整示例
+
+#### 1. 标准验证流程
+```bash
+# 生成测试数据
+milvus-ingest generate --builtin ecommerce_search --total-rows 10000 --out ./test_data
+
+# 导入到 Milvus
+milvus-ingest to-milvus insert ./test_data
+
+# 快速验证（推荐作为第一步）
+milvus-ingest to-milvus verify ./test_data --level count
+
+# 详细验证（推荐作为第二步）  
+milvus-ingest to-milvus verify ./test_data --level scalar
+
+# 完整验证（可选，最全面）
+milvus-ingest to-milvus verify ./test_data --level full
+```
+
+#### 2. 生产环境验证
+```bash
+# 生产数据验证流程
+milvus-ingest to-milvus verify ./production_data \
+  --uri http://prod-milvus:19530 \
+  --token $PROD_TOKEN \
+  --db-name production \
+  --collection-name product_vectors_v2 \
+  --level scalar
+```
+
+#### 3. 大规模数据验证
+```bash
+# 大规模数据（建议分步验证）
+# 第一步：快速验证行数和基本功能
+milvus-ingest to-milvus verify ./large_dataset --level count
+
+# 第二步：如果快速验证通过，再进行详细验证
+milvus-ingest to-milvus verify ./large_dataset --level scalar
+```
+
+### 输出示例
+
+#### count 级别输出
+```
+[INFO] 开始数据验证 (level: count)
+[INFO] 连接到 Milvus: http://localhost:19530
+[INFO] 验证集合: ecommerce_search
+
+╭─────────────── 验证结果总览 ────────────────╮
+│ 集合统计                                   │
+│ ├─ 原始数据行数: 10,000                    │
+│ ├─ Milvus 行数:  10,000                    │
+│ └─ 行数匹配: ✅ PASS                       │
+│                                           │
+│ 查询功能测试                               │
+│ ├─ 精确查询测试: 980/1000 (98%) ✅ PASS     │
+│ ├─ 向量搜索测试: 845/1000 (84.5%) ✅ PASS   │
+│ └─ 功能测试: ✅ PASS                       │
+╰───────────────────────────────────────────╯
+
+[SUCCESS] 验证完成: 数据导入成功且功能正常
+```
+
+#### scalar 级别输出
+```
+[INFO] 开始数据验证 (level: scalar)
+[INFO] 验证字段: id, product_name, price, category
+
+╭─────────────── 字段验证详情 ────────────────╮
+│ Field        │ Type     │ Status          │
+├──────────────┼──────────┼─────────────────┤
+│ id          │ Int64    │ ✅ PASS (SKIP)   │
+│ product_name│ VarChar  │ ✅ PASS (10000) │
+│ price       │ Float    │ ✅ PASS (9995)  │
+│ category    │ VarChar  │ ✅ PASS (10000) │
+╰─────────────────────────────────────────────╯
+
+[SUCCESS] 标量字段验证通过: 29995/30000 (99.98%)
+[SUCCESS] 查询功能测试通过
+```
+
+#### full 级别输出
+```
+[INFO] 开始数据验证 (level: full)
+[INFO] 包含向量字段验证，这可能需要较长时间...
+
+╭─────────────── 完整验证结果 ────────────────╮
+│ 标量字段: ✅ PASS (99.98% 匹配)             │
+│ 向量字段: ✅ PASS (99.95% 匹配)             │
+│ 查询测试: ✅ PASS (98% 成功率)              │
+│ 搜索测试: ✅ PASS (84.5% 成功率)            │
+╰───────────────────────────────────────────╯
+
+[SUCCESS] 完整验证通过: 数据质量优秀
+```
+
+### 故障排除
+
+#### 1. 连接错误
+```
+错误: [ConnectionError] 无法连接到 Milvus
+```
+**解决方案:**
+```bash
+# 检查 Milvus 服务状态
+curl http://localhost:19530/healthz
+
+# 检查 URI 格式
+--uri http://localhost:19530  # 正确
+--uri localhost:19530         # 错误
+```
+
+#### 2. 集合不存在
+```
+错误: [CollectionNotFound] 集合 'test_collection' 不存在
+```
+**解决方案:**
+```bash
+# 检查集合名称
+milvus-ingest to-milvus verify ./data --collection-name correct_name
+
+# 或先导入数据
+milvus-ingest to-milvus insert ./data
+```
+
+#### 3. 数据不匹配
+```
+警告: 字段 'price' 验证失败 (8950/10000 匹配)
+```
+**说明:** 这是正常的，通常由浮点精度差异引起。如果匹配率>95%，验证仍会通过。
+
+#### 4. 查询测试失败
+```
+错误: 查询功能测试失败 (成功率: 45%)
+```
+**可能原因:**
+- 索引未完全构建
+- 数据尚未完全加载
+- 网络连接问题
+
+**解决方案:**
+```bash
+# 等待索引构建完成后重试
+sleep 60 && milvus-ingest to-milvus verify ./data --level count
+```
+
+### 最佳实践
+
+#### 1. 分级验证策略
+```bash
+# 推荐验证流程
+echo "第1步: 快速验证"
+milvus-ingest to-milvus verify ./data --level count
+
+echo "第2步: 业务验证"  
+milvus-ingest to-milvus verify ./data --level scalar
+
+echo "第3步: 完整验证（可选）"
+milvus-ingest to-milvus verify ./data --level full
+```
+
+#### 2. 自动化验证
+```bash
+#!/bin/bash
+# 自动化数据导入和验证脚本
+
+DATA_DIR="./generated_data"
+COLLECTION_NAME="test_collection"
+
+# 导入数据
+echo "导入数据..."
+milvus-ingest to-milvus insert $DATA_DIR --collection-name $COLLECTION_NAME
+
+# 等待索引构建
+echo "等待索引构建..."
+sleep 30
+
+# 执行验证
+echo "执行验证..."
+milvus-ingest to-milvus verify $DATA_DIR \
+  --collection-name $COLLECTION_NAME \
+  --level scalar
+
+echo "验证完成"
+```
+
+#### 3. 生产环境监控
+```bash
+# 生产环境定期验证
+# 建议加入 crontab
+0 2 * * * milvus-ingest to-milvus verify /data/production \
+  --uri $PROD_MILVUS_URI \
+  --token $PROD_TOKEN \
+  --level count \
+  >> /var/log/milvus-verify.log 2>&1
+```
 
 ---
 

@@ -28,28 +28,29 @@ milvus-ingest --help
 
 ```bash
 # 生成简单测试数据并预览
-milvus-ingest generate --builtin simple --total-rows 1000 --preview
+milvus-ingest generate --builtin product_catalog --total-rows 1000 --preview
 ```
 
 输出示例：
 ```
-Schema: simple
-Collection: simple_collection
+Schema: product_catalog
+Collection: product_catalog
 
 预览数据 (前5行):
-┌────┬─────────────────────────────────┬──────────────────────────────────┐
-│ id │ text                           │ embedding                        │
-├────┼─────────────────────────────────┼──────────────────────────────────┤
-│ 1  │ High-quality wireless headphones│ [0.123, -0.456, 0.789, ...]     │
-│ 2  │ Smart home automation device   │ [-0.234, 0.567, -0.890, ...]    │
-│ 3  │ Professional camera lens       │ [0.345, -0.678, 0.123, ...]     │
-│ 4  │ Ergonomic office chair         │ [-0.456, 0.789, -0.234, ...]    │
-│ 5  │ Portable power bank            │ [0.567, -0.123, 0.456, ...]     │
-└────┴─────────────────────────────────┴──────────────────────────────────┘
+┌────┬─────────────────────────────────┬────────┬──────────────────────────────────┐
+│ id │ product_name                   │ price  │ embedding                        │
+├────┼─────────────────────────────────┼────────┼──────────────────────────────────┤
+│ 1  │ High-quality wireless headphones│ 159.99 │ [0.123, -0.456, 0.789, ...]     │
+│ 2  │ Smart home automation device   │ 89.99  │ [-0.234, 0.567, -0.890, ...]    │
+│ 3  │ Professional camera lens       │ 299.99 │ [0.345, -0.678, 0.123, ...]     │
+│ 4  │ Ergonomic office chair         │ 199.99 │ [-0.456, 0.789, -0.234, ...]    │
+│ 5  │ Portable power bank            │ 49.99  │ [0.567, -0.123, 0.456, ...]     │
+└────┴─────────────────────────────────┴────────┴──────────────────────────────────┘
 
 字段信息:
 - id: Int64 (主键, 自动生成)
-- text: VarChar (最大长度: 200)
+- product_name: VarChar (最大长度: 200)  
+- price: Float (范围: 9.99-999.99)
 - embedding: FloatVector (维度: 128)
 ```
 
@@ -57,7 +58,7 @@ Collection: simple_collection
 
 ```bash
 # 生成1万行数据
-milvus-ingest generate --builtin simple --total-rows 10000 --out ./my_first_dataset
+milvus-ingest generate --builtin product_catalog --total-rows 10000 --out ./my_first_dataset
 ```
 
 输出：
@@ -85,33 +86,37 @@ milvus-ingest schema list
 
 输出：
 ```
-内置模式 (Built-in Schemas):
-├── simple              基础示例模式
-├── ecommerce           电商产品目录  
-├── documents           文档搜索模式
-├── images              图像库模式
-├── users               用户档案模式
-├── videos              视频库模式
-├── news                新闻文章模式
-├── audio_transcripts   音频转录模式
-├── ai_conversations    AI对话模式
-├── face_recognition    人脸识别模式
-├── ecommerce_partitioned 分区电商模式
-└── cardinality_demo    基数约束演示
+Built-in Schemas
 
-总计: 12个内置模式, 0个自定义模式
+╭────────── product_catalog - Product Catalog ─────────╮
+│ Simple product catalog for getting started with auto_id │
+│ Fields: 4 • Vector dims: 128                          │
+│ Use cases: Learning, Basic product search, Auto ID   │
+╰──────────────────────────────────────────────────────╯
+╭────────── ecommerce_search - E-commerce Search ──────╮
+│ E-commerce product search with nullable fields       │
+│ Fields: 5 • Vector dims: 256                         │
+│ Use cases: Product search, E-commerce, Nullable      │
+╰──────────────────────────────────────────────────────╯
+╭────────── news_articles - News Articles ─────────────╮
+│ News article storage with dynamic fields             │
+│ Fields: 4 • Vector dims: 768                         │
+│ Use cases: News search, Dynamic schema, Content      │
+╰──────────────────────────────────────────────────────╯
+
+以及其他3个模式...
 ```
 
 ### 尝试电商数据模式
 
 ```bash
 # 先预览电商模式的结构
-milvus-ingest schema show ecommerce
+milvus-ingest schema show ecommerce_search
 ```
 
 ```bash
 # 生成电商测试数据
-milvus-ingest generate --builtin ecommerce --total-rows 5000 --out ./ecommerce_data
+milvus-ingest generate --builtin ecommerce_search --total-rows 5000 --out ./ecommerce_data
 ```
 
 这会生成包含产品信息、价格、评分、多个向量字段的真实电商数据。
@@ -134,8 +139,8 @@ cat ./my_first_dataset/meta.json
 
 ```json
 {
-  "collection_name": "simple_collection",
-  "description": "基础示例模式",
+  "collection_name": "product_catalog",
+  "description": "产品目录模式",
   "fields": [
     {
       "name": "id",
@@ -144,9 +149,15 @@ cat ./my_first_dataset/meta.json
       "auto_id": true
     },
     {
-      "name": "text",
+      "name": "product_name",
       "type": "VarChar",
       "max_length": 200
+    },
+    {
+      "name": "price",
+      "type": "Float",
+      "min": 9.99,
+      "max": 999.99
     },
     {
       "name": "embedding", 
@@ -326,10 +337,10 @@ milvus-ingest clean --yes
 ```
 
 ### 常用模式推荐
-- `simple` - 学习和基础测试
-- `ecommerce` - 电商/推荐系统
-- `documents` - 文档搜索/RAG 应用
-- `users` - 用户画像/个性化推荐
+- `product_catalog` - 学习和基础测试（推荐新用户）
+- `ecommerce_search` - 电商/推荐系统
+- `document_search` - 文档搜索/RAG 应用
+- `multi_tenant_data` - 多租户系统
 
 ### 性能建议
 - 小于10万行：直接生成
