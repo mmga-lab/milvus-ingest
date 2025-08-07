@@ -191,8 +191,8 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             steps {
                 container('main') {
                     script {
-                        sh "pip install pdm"
-                        sh "pip install uv"
+                        sh "pip install pdm -i https://pypi.tuna.tsinghua.edu.cn/simple"
+                        sh "pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple"
                     }
                 }
             }
