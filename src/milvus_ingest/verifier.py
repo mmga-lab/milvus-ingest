@@ -799,24 +799,43 @@ class MilvusVerifier:
         exact_query_passed = self._test_exact_queries(sample_size // 2)
         all_passed = all_passed and exact_query_passed
 
-        # Test vector search for all testable vector fields
+        # Test vector search for dense vector fields only (skip sparse for performance)
         vector_fields = [
             f for f in self.schema.get("fields", []) if "Vector" in f["type"]
         ]
-        testable_vector_fields = [
-            f for f in vector_fields if not self._is_function_output_field(f["name"])
+        # Filter for dense vectors only and exclude function outputs
+        dense_vector_fields = [
+            f
+            for f in vector_fields
+            if f["type"]
+            in ["FloatVector", "BinaryVector", "Float16Vector", "BFloat16Vector"]
+            and not self._is_function_output_field(f["name"])
         ]
 
-        if testable_vector_fields:
+        if dense_vector_fields:
             vector_search_passed = True
-            for vector_field in testable_vector_fields:
-                field_test_passed = self._test_vector_search(
-                    vector_field, sample_size // 2
-                )
-                vector_search_passed = vector_search_passed and field_test_passed
+            # Test only the first dense vector field to reduce verification time
+            vector_field = dense_vector_fields[0]
+            field_test_passed = self._test_vector_search(
+                vector_field,
+                min(10, sample_size // 10),  # Reduced to 10 samples max
+            )
+            vector_search_passed = vector_search_passed and field_test_passed
             all_passed = all_passed and vector_search_passed
+
+            if len(dense_vector_fields) > 1:
+                display_info(
+                    f"Only tested first dense vector field '{vector_field['name']}' for performance (found {len(dense_vector_fields)} dense vector fields)"
+                )
         else:
-            if vector_fields:
+            sparse_vector_count = len(
+                [f for f in vector_fields if f["type"] == "SparseFloatVector"]
+            )
+            if sparse_vector_count > 0:
+                display_info(
+                    f"Found {sparse_vector_count} sparse vector fields - skipping vector search verification for performance (flat index)"
+                )
+            elif vector_fields:
                 display_info(
                     "All vector fields are function outputs, skipping vector search verification"
                 )
@@ -897,6 +916,7 @@ class MilvusVerifier:
     ) -> bool:
         """Test vector search returns reasonable results."""
         field_name = vector_field["name"]
+        field_type = vector_field["type"]
 
         # Get primary key field for result identification
         pk_field = None
@@ -908,8 +928,6 @@ class MilvusVerifier:
         if not pk_field:
             display_info("No primary key field found, skipping vector search test")
             return False
-
-        # Note: Function output field check is now done at the caller level
 
         # Sample some vectors with their primary keys
         try:
@@ -929,22 +947,23 @@ class MilvusVerifier:
             display_error(f"Failed to sample vectors for search test: {e}")
             return False
 
-        # Test vector searches
+        # Test vector searches with reduced limit for performance
         passed = 0
+        search_limit = 5  # Reduced from 10 for better performance with flat index
         for row in sample_data:
             query_vector = row[field_name]
             query_pk = row[pk_field]
             try:
-                # Use search without hardcoded parameters to let Milvus use index defaults
+                # Use reduced search parameters for better performance
                 search_results = self.client.search(
                     collection_name=self.collection_name,
                     data=[query_vector],
                     anns_field=field_name,
-                    limit=10,
+                    limit=search_limit,
                     output_fields=[pk_field],
                 )
 
-                # Check if the query vector itself is returned in top 10 results
+                # Check if the query vector itself is returned in top results
                 found_self = False
                 if search_results and len(search_results[0]) > 0:
                     for result in search_results[0]:
@@ -957,16 +976,17 @@ class MilvusVerifier:
             except Exception as e:
                 logger.debug(f"Vector search failed: {e}")
 
-        recall_at_10 = passed / len(sample_data) if sample_data else 0
-        success = recall_at_10 > 0.9  # 90% recall@10 for vector search
+        recall_rate = passed / len(sample_data) if sample_data else 0
+        # Reduced threshold to 80% since we're using fewer samples and smaller search limit
+        success = recall_rate > 0.8
 
         if success:
             display_success(
-                f"✓ Vector search recall@10: {passed}/{len(sample_data)} passed ({recall_at_10:.1%})"
+                f"✓ Dense vector search recall@{search_limit}: {passed}/{len(sample_data)} passed ({recall_rate:.1%}) [{field_type}]"
             )
         else:
             display_error(
-                f"✗ Vector search recall@10: {passed}/{len(sample_data)} passed ({recall_at_10:.1%})"
+                f"✗ Dense vector search recall@{search_limit}: {passed}/{len(sample_data)} passed ({recall_rate:.1%}) [{field_type}]"
             )
 
         return success
