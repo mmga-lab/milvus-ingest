@@ -664,6 +664,30 @@ class MilvusVerifier:
         if value is None:
             return "None"
 
+        # Handle sparse vectors
+        if field_type == "SparseFloatVector":
+            # Parse JSON string if needed
+            if isinstance(value, str):
+                try:
+                    import json
+
+                    value = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    # If parsing fails, show raw string (truncated)
+                    if len(value) > 100:
+                        return value[:100] + "..."
+                    return value
+
+            if isinstance(value, dict):
+                # Show first few key-value pairs
+                items = list(value.items())[:5]
+                formatted = ", ".join([f"{k}: {v:.4f}" for k, v in items])
+                if len(value) > 5:
+                    return f"{{{formatted}, ...}} (nnz={len(value)})"
+                return f"{{{formatted}}}"
+            return str(value)
+
+        # Handle dense vectors
         if "Vector" in field_type:
             if isinstance(value, list | np.ndarray):
                 arr = np.array(value)
@@ -708,7 +732,11 @@ class MilvusVerifier:
             if source_value is None or milvus_value is None:
                 return False
 
-            # Handle vector fields
+            # Handle sparse vector fields
+            if field_type == "SparseFloatVector":
+                return self._compare_sparse_vectors(source_value, milvus_value)
+
+            # Handle dense vector fields
             if "Vector" in field_type:
                 if not isinstance(source_value, list | np.ndarray):
                     return False
@@ -1100,6 +1128,89 @@ class MilvusVerifier:
 
         except Exception as e:
             display_error(f"✗ Function field verification failed: {e}")
+            return False
+
+    def _compare_sparse_vectors(self, source_value: Any, milvus_value: Any) -> bool:
+        """Compare sparse vectors, handling different key formats and JSON strings."""
+        import json
+
+        try:
+            # Handle None values
+            if source_value is None and milvus_value is None:
+                return True
+            if source_value is None or milvus_value is None:
+                return False
+
+            # Parse source value if it's a JSON string
+            if isinstance(source_value, str):
+                try:
+                    source_value = json.loads(source_value)
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug(
+                        f"Failed to parse source sparse vector as JSON: {source_value[:100]}"
+                    )
+                    return False
+
+            # Parse milvus value if it's a JSON string (unlikely but handle it)
+            if isinstance(milvus_value, str):
+                try:
+                    milvus_value = json.loads(milvus_value)
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug(
+                        f"Failed to parse milvus sparse vector as JSON: {milvus_value[:100]}"
+                    )
+                    return False
+
+            # Both values should be dictionaries after parsing
+            if not isinstance(source_value, dict) or not isinstance(milvus_value, dict):
+                logger.debug(
+                    f"Sparse vector type mismatch: source={type(source_value)}, milvus={type(milvus_value)}"
+                )
+                return False
+
+            # Convert source keys to integers if they're strings
+            source_normalized = {}
+            for key, value in source_value.items():
+                try:
+                    key_int = int(key)
+                    source_normalized[key_int] = float(value)
+                except (ValueError, TypeError):
+                    # If can't convert, keep original
+                    source_normalized[key] = float(value)
+
+            # Normalize milvus dict (ensure keys are ints and values are floats)
+            milvus_normalized = {}
+            for key, value in milvus_value.items():
+                try:
+                    key_int = int(key) if not isinstance(key, int) else key
+                    milvus_normalized[key_int] = float(value)
+                except (ValueError, TypeError):
+                    milvus_normalized[key] = float(value)
+
+            # Check if keys match
+            if set(source_normalized.keys()) != set(milvus_normalized.keys()):
+                logger.debug(
+                    f"Sparse vector key mismatch: source_keys={list(source_normalized.keys())[:10]}, milvus_keys={list(milvus_normalized.keys())[:10]}"
+                )
+                return False
+
+            # Check if values match with tolerance (3 decimal places)
+            for key in source_normalized:
+                source_val = source_normalized[key]
+                milvus_val = milvus_normalized.get(key)
+                if milvus_val is None:
+                    return False
+                # Compare with 3 decimal places precision
+                if abs(source_val - milvus_val) > 0.001:
+                    logger.debug(
+                        f"Sparse vector value mismatch at key {key}: source={source_val:.6f}, milvus={milvus_val:.6f}"
+                    )
+                    return False
+
+            return True
+
+        except Exception as e:
+            logger.debug(f"Sparse vector comparison error: {e}")
             return False
 
     def _compare_json_values(self, source_value: Any, milvus_value: Any) -> bool:
