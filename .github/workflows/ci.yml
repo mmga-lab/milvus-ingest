@@ -117,26 +117,26 @@ jobs:
           pdm install || (pdm lock --update-reuse && pdm install)
 
       - name: Test CLI help
-        run: pdm run milvus-fake-data --help
+        run: pdm run milvus-ingest --help
 
       - name: Test schema management help
-        run: pdm run milvus-fake-data schema help
+        run: pdm run milvus-ingest schema help
 
       - name: List built-in schemas
-        run: pdm run milvus-fake-data schema list
+        run: pdm run milvus-ingest schema list
 
       - name: Show built-in schema details
-        run: pdm run milvus-fake-data schema show simple
+        run: pdm run milvus-ingest schema show simple
 
       - name: Create test schema
         run: |
           echo '{"collection_name": "test_collection", "fields": [{"name": "id", "type": "Int64", "is_primary": true}, {"name": "text", "type": "VarChar", "max_length": 100}]}' > my_schema.json
 
       - name: Test schema validation
-        run: pdm run milvus-fake-data generate --schema my_schema.json --validate-only
+        run: pdm run milvus-ingest generate --schema my_schema.json --validate-only
 
       - name: Test built-in schema generation
-        run: pdm run milvus-fake-data generate --builtin simple --rows 10 --preview
+        run: pdm run milvus-ingest generate --builtin simple --total-rows 10 --preview
 
       - name: Test custom schema generation
-        run: pdm run milvus-fake-data generate --schema my_schema.json --rows 10 --preview
+        run: pdm run milvus-ingest generate --schema my_schema.json --total-rows 10 --preview

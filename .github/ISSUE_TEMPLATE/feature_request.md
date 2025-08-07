@@ -23,7 +23,7 @@ If applicable, provide examples of how this feature would be used:
 
 ```bash
 # Example command
-milvus-fake-data --new-feature-flag --schema schema.json
+milvus-ingest generate --new-feature-flag --schema schema.json
 ```
 
 ```json

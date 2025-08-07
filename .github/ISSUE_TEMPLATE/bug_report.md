@@ -11,7 +11,7 @@ A clear and concise description of what the bug is.
 
 ## To Reproduce
 Steps to reproduce the behavior:
-1. Command run: `milvus-fake-data ...`
+1. Command run: `milvus-ingest ...`
 2. Schema used: (attach or paste schema file)
 3. Expected behavior
 4. Actual behavior
@@ -34,7 +34,7 @@ Steps to reproduce the behavior:
 
 ## Command and Output
 ```bash
-$ milvus-fake-data --schema schema.json --rows 100
+$ milvus-ingest generate --schema schema.json --total-rows 100
 # Paste the full command and output here
 ```
 
