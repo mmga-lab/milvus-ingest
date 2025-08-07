@@ -91,7 +91,7 @@ pipeline {
                         fileConfigs.add([count: 10, size: '1GB', desc: 'Large Files'])
                     }
                     if (params.run_small_files) {
-                        fileConfigs.add([count: 100, size: '200MB', desc: 'Small Files'])
+                        fileConfigs.add([count: 500, size: '200MB', desc: 'Small Files'])
                     }
                     
                     // Formats
