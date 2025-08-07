@@ -140,7 +140,7 @@ class MilvusBulkImporter:
         create_collection: bool = True,
         drop_if_exists: bool = False,
         use_flat_index: bool = True,
-        max_files_per_batch: int = 50,
+        max_files_per_batch: int = 200,
     ) -> list[str]:
         """Start bulk import jobs with batching support.
 
@@ -152,7 +152,7 @@ class MilvusBulkImporter:
             create_collection: Try to create collection if it doesn't exist
             drop_if_exists: Drop collection if it already exists
             use_flat_index: Use FLAT index for dense vector fields only (default: True, provides 100% recall)
-            max_files_per_batch: Maximum number of files per import request (default: 50)
+            max_files_per_batch: Maximum number of files per import request (default: 200)
 
         Returns:
             List of Job IDs for all import tasks

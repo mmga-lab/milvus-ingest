@@ -60,7 +60,7 @@ def setup_logging(
     logger.remove()
 
     # Console logging setup
-    console_format = VERBOSE_FORMAT if verbose else NORMAL_FORMAT
+    console_format = VERBOSE_FORMAT  # Always use verbose format for better debugging
     console_level = "DEBUG" if verbose else log_level
 
     # If rich_console is provided, use it for logging to avoid conflicts with progress bars
