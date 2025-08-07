@@ -101,7 +101,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         string(
             description: 'File Count',
             name: 'file_count',
-            defaultValue: '10'
+            defaultValue: '200'
         )
         string(
             description: 'File Size (e.g., 1GB, 100MB)',
@@ -121,7 +121,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         string(
             description: 'Partition Count',
             name: 'partition_count',
-            defaultValue: '128'
+            defaultValue: '16'
         )
         string(
             description: 'Shard Count (VChannels)',

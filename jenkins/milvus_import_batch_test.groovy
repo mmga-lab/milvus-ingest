@@ -124,7 +124,7 @@ pipeline {
                                         fileDesc: fileConfig.desc,
                                         format: format,
                                         storage: storage,
-                                        partitions: 128,  // Multi-partition test
+                                        partitions: 16,  // Multi-partition test
                                         shards: 2         // Multi-vchannel test
                                     ])
                                 }
