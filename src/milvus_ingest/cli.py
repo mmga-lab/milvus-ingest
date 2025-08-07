@@ -1463,7 +1463,7 @@ def import_to_milvus(
             create_collection=True,  # Always try to create with metadata
             drop_if_exists=drop_if_exists,
             use_flat_index=not use_autoindex,  # Default to FLAT unless --use-autoindex specified
-            max_files_per_batch=50,  # Max 50 files per batch to avoid large meta requests
+            max_files_per_batch=250,  # Max 250 files per batch to avoid large meta requests
         )
 
         if len(job_ids) == 1:
