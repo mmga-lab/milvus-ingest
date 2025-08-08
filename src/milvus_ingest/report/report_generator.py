@@ -262,9 +262,11 @@ class ReportGenerator:
                     summary["end_time"] = data.timestamp
 
         # Calculate total time from phases
+        # "all_completed" represents the total import time from start to finish
         if "all_completed" in summary["phases"]:
             summary["total_time"] = summary["phases"]["all_completed"]
         elif summary["phases"]:
+            # Fallback: sum all phases if no "all_completed" phase found
             summary["total_time"] = sum(summary["phases"].values())
 
         return summary

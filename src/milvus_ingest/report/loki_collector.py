@@ -82,9 +82,9 @@ class LokiDataCollector:
                 )
                 self.logger.info(f"Found {len(timing_logs)} jobTimeCost logs for job {job_id}")
                 if timing_logs:
-                    self.logger.info(f"Sample timing log messages:")
-                    for i, log in enumerate(timing_logs[:3]):  # Show first 3 as examples
-                        self.logger.info(f"  [{i+1}] {log['message'][:100]}...")
+                    self.logger.info(f"Full timing log messages:")
+                    for i, log in enumerate(timing_logs):  # Show all logs at info level
+                        self.logger.info(f"  [{i+1}] {log['message']}")
                 all_logs.extend(timing_logs)
                 if timing_logs:
                     timing_logs_found = True
@@ -99,9 +99,9 @@ class LokiDataCollector:
                 )
                 self.logger.info(f"Found {len(general_timing_logs)} general jobTimeCost logs")
                 if general_timing_logs:
-                    self.logger.info(f"Sample general timing log messages:")
-                    for i, log in enumerate(general_timing_logs[:3]):  # Show first 3 as examples
-                        self.logger.info(f"  [{i+1}] {log['message'][:100]}...")
+                    self.logger.info(f"Full general timing log messages:")
+                    for i, log in enumerate(general_timing_logs):  # Show all logs at info level
+                        self.logger.info(f"  [{i+1}] {log['message']}")
                 all_logs.extend(general_timing_logs)
                 if general_timing_logs:
                     timing_logs_found = True
@@ -124,9 +124,9 @@ class LokiDataCollector:
                     
                     self.logger.info(f"Found {len(logs)} logs with patterns: {patterns}")
                     if logs:
-                        self.logger.info(f"Sample pattern-based log messages:")
-                        for i, log in enumerate(logs[:2]):  # Show first 2 as examples
-                            self.logger.info(f"  [{i+1}] {log['message'][:100]}...")
+                        self.logger.info(f"Full pattern-based log messages:")
+                        for i, log in enumerate(logs):  # Show all logs at info level
+                            self.logger.info(f"  [{i+1}] {log['message']}")
                     all_logs.extend(logs)
                     
                     # If we found logs with specific patterns, prefer those
@@ -346,6 +346,10 @@ class LokiDataCollector:
             
             # Determine import phase
             import_phase = self._determine_import_phase(message)
+            
+            # Special handling for total time from jobTimeCost/total=XXX pattern
+            if import_state == "total":
+                import_phase = "all_completed"  # Map "total" to "all_completed" phase
             
             # Extract collection name
             collection_name = self._extract_collection_name(message)
