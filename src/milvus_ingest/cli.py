@@ -1289,6 +1289,7 @@ def report() -> None:
 @click.option("--notes", help="Additional notes for the test")
 @click.option("--release-name", help="Milvus release name (for Prometheus queries)")
 @click.option("--milvus-namespace", help="Milvus namespace (for Prometheus queries)")
+@click.option("--import-info-file", help="Path to import_info.json file for additional metadata")
 def generate_report(
     job_ids: tuple,
     collection_name: Optional[str],
@@ -1303,6 +1304,7 @@ def generate_report(
     notes: Optional[str],
     release_name: Optional[str],
     milvus_namespace: Optional[str],
+    import_info_file: Optional[str],
 ) -> None:
     """Generate CSV report for import analysis with Prometheus metrics."""
     from datetime import datetime, timedelta
@@ -1340,6 +1342,7 @@ def generate_report(
         notes=notes,
         release_name=release_name,
         milvus_namespace=milvus_namespace,
+        import_info_file=import_info_file,
     )
     
     # Display summary

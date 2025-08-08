@@ -71,76 +71,144 @@ class PrometheusCollector:
         start_time: Optional[datetime] = None, 
         end_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        """Get DataNode memory and CPU metrics with optional time range support."""
-        metrics = {}
+        """Get DataNode memory and CPU metrics for each pod separately."""
+        metrics = {
+            "datanode_pods": [],
+            "summary": {}
+        }
         
-        # DataNode Memory (in GB)
-        memory_query = f'sum(container_memory_working_set_bytes{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}) by (container)'
+        # DataNode Memory (in GB) - per pod
+        memory_query = f'container_memory_working_set_bytes{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}'
         
-        if start_time and end_time:
-            try:
-                result = self.query_prometheus_range(memory_query, start_time, end_time)
-                if result['data']['result']:
-                    all_values = []
-                    for series in result['data']['result']:
-                        for timestamp, value in series['values']:
-                            all_values.append(float(value))
+        try:
+            # Use time range queries if available, otherwise single point
+            if start_time and end_time:
+                memory_result = self.query_prometheus_range(memory_query, start_time, end_time)
+                cpu_query = f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}[5m])'
+                cpu_result = self.query_prometheus_range(cpu_query, start_time, end_time)
+                use_time_range = True
+            else:
+                memory_result = self.query_prometheus(memory_query)
+                cpu_query = f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}[5m])'
+                cpu_result = self.query_prometheus(cpu_query)
+                use_time_range = False
+            
+            # Group by pod
+            pod_metrics = {}
+            
+            # Process memory data
+            if memory_result['data']['result']:
+                for series in memory_result['data']['result']:
+                    pod_name = series['metric'].get('pod', 'unknown')
+                    container = series['metric'].get('container', 'unknown')
                     
-                    if all_values:
-                        all_values_gb = [v / (1024 * 1024 * 1024) for v in all_values]
-                        memory_stats = self.calculate_stats(all_values_gb)
-                        metrics['datanode_memory_gb'] = memory_stats
-                        metrics['datanode_container'] = result['data']['result'][0]['metric'].get('container', 'unknown')
+                    if pod_name not in pod_metrics:
+                        pod_metrics[pod_name] = {'pod_name': pod_name, 'containers': {}}
+                    
+                    if use_time_range:
+                        # Extract all values over time and calculate stats
+                        memory_values_gb = []
+                        for timestamp, value in series['values']:
+                            memory_gb = float(value) / (1024 * 1024 * 1024)
+                            memory_values_gb.append(memory_gb)
+                        
+                        memory_stats = self.calculate_stats(memory_values_gb) if memory_values_gb else {'min': 0, 'max': 0, 'avg': 0}
+                        pod_metrics[pod_name]['containers'][container] = {
+                            'memory_gb': memory_stats,
+                            'cpu_cores': {'min': 0, 'max': 0, 'avg': 0}
+                        }
                     else:
-                        metrics['datanode_memory_gb'] = {"min": 0, "max": 0, "avg": 0}
-                else:
-                    metrics['datanode_memory_gb'] = {"min": 0, "max": 0, "avg": 0}
-            except Exception as e:
-                self.logger.warning(f"Error querying DataNode memory range: {e}")
-                metrics['datanode_memory_gb'] = {"min": 0, "max": 0, "avg": 0}
-        else:
-            try:
-                result = self.query_prometheus(memory_query)
-                if result['data']['result']:
-                    total_memory_bytes = sum(float(r['value'][1]) for r in result['data']['result'])
-                    metrics['datanode_memory_gb'] = total_memory_bytes / (1024 * 1024 * 1024)
-                    metrics['datanode_container'] = result['data']['result'][0]['metric'].get('container', 'unknown')
-                else:
-                    metrics['datanode_memory_gb'] = 0
-            except Exception as e:
-                self.logger.warning(f"Error querying DataNode memory: {e}")
-                metrics['datanode_memory_gb'] = 0
-        
-        # DataNode CPU (cores)
-        cpu_query = f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*"}}[5m]))'
-        
-        if start_time and end_time:
-            try:
-                result = self.query_prometheus_range(cpu_query, start_time, end_time)
-                if result['data']['result']:
-                    all_values = []
-                    for series in result['data']['result']:
-                        for timestamp, value in series['values']:
-                            all_values.append(float(value))
+                        # Single point in time
+                        memory_gb = float(series['value'][1]) / (1024 * 1024 * 1024)
+                        pod_metrics[pod_name]['containers'][container] = {
+                            'memory_gb': round(memory_gb, 3),
+                            'cpu_cores': 0
+                        }
+            
+            # Process CPU data  
+            if cpu_result['data']['result']:
+                for series in cpu_result['data']['result']:
+                    pod_name = series['metric'].get('pod', 'unknown')
+                    container = series['metric'].get('container', 'unknown')
                     
-                    cpu_stats = self.calculate_stats(all_values)
-                    metrics['datanode_cpu_cores'] = cpu_stats
-                else:
-                    metrics['datanode_cpu_cores'] = {"min": 0, "max": 0, "avg": 0}
-            except Exception as e:
-                self.logger.warning(f"Error querying DataNode CPU range: {e}")
-                metrics['datanode_cpu_cores'] = {"min": 0, "max": 0, "avg": 0}
-        else:
-            try:
-                result = self.query_prometheus(cpu_query)
-                if result['data']['result']:
-                    total_cpu = sum(float(r['value'][1]) for r in result['data']['result'])
-                    metrics['datanode_cpu_cores'] = total_cpu
-                else:
-                    metrics['datanode_cpu_cores'] = 0
-            except Exception as e:
-                self.logger.warning(f"Error querying DataNode CPU: {e}")
-                metrics['datanode_cpu_cores'] = 0
+                    if pod_name in pod_metrics and container in pod_metrics[pod_name]['containers']:
+                        if use_time_range:
+                            # Extract all values over time and calculate stats
+                            cpu_values = []
+                            for timestamp, value in series['values']:
+                                cpu_cores = float(value)
+                                cpu_values.append(cpu_cores)
+                            
+                            cpu_stats = self.calculate_stats(cpu_values) if cpu_values else {'min': 0, 'max': 0, 'avg': 0}
+                            pod_metrics[pod_name]['containers'][container]['cpu_cores'] = cpu_stats
+                        else:
+                            # Single point in time
+                            cpu_cores = float(series['value'][1])
+                            pod_metrics[pod_name]['containers'][container]['cpu_cores'] = round(cpu_cores, 4)
+            
+            # Convert to list format and calculate summary
+            all_memory_stats = {'min': [], 'max': [], 'avg': []}
+            all_cpu_stats = {'min': [], 'max': [], 'avg': []}
+            
+            for pod_name, pod_data in pod_metrics.items():
+                pod_info = {
+                    'pod_name': pod_name,
+                    'containers': [],
+                    'use_time_range': use_time_range
+                }
+                
+                for container, container_data in pod_data['containers'].items():
+                    pod_info['containers'].append({
+                        'container_name': container,
+                        'memory_gb': container_data['memory_gb'],
+                        'cpu_cores': container_data['cpu_cores']
+                    })
+                    
+                    # Collect values for summary statistics
+                    if use_time_range:
+                        if isinstance(container_data['memory_gb'], dict):
+                            all_memory_stats['min'].append(container_data['memory_gb']['min'])
+                            all_memory_stats['max'].append(container_data['memory_gb']['max'])
+                            all_memory_stats['avg'].append(container_data['memory_gb']['avg'])
+                        if isinstance(container_data['cpu_cores'], dict):
+                            all_cpu_stats['min'].append(container_data['cpu_cores']['min'])
+                            all_cpu_stats['max'].append(container_data['cpu_cores']['max'])
+                            all_cpu_stats['avg'].append(container_data['cpu_cores']['avg'])
+                    else:
+                        all_memory_stats['avg'].append(container_data['memory_gb'])
+                        all_cpu_stats['avg'].append(container_data['cpu_cores'])
+                
+                metrics['datanode_pods'].append(pod_info)
+            
+            # Calculate summary statistics
+            if use_time_range:
+                if all_memory_stats['avg']:
+                    metrics['summary']['memory_gb'] = {
+                        'total_avg': round(sum(all_memory_stats['avg']), 3),
+                        'min': round(min(all_memory_stats['min']), 3),
+                        'max': round(max(all_memory_stats['max']), 3),
+                        'avg': round(sum(all_memory_stats['avg']) / len(all_memory_stats['avg']), 3)
+                    }
+                
+                if all_cpu_stats['avg']:
+                    metrics['summary']['cpu_cores'] = {
+                        'total_avg': round(sum(all_cpu_stats['avg']), 4),
+                        'min': round(min(all_cpu_stats['min']), 4),
+                        'max': round(max(all_cpu_stats['max']), 4),
+                        'avg': round(sum(all_cpu_stats['avg']) / len(all_cpu_stats['avg']), 4)
+                    }
+            else:
+                if all_memory_stats['avg']:
+                    metrics['summary']['total_memory_gb'] = round(sum(all_memory_stats['avg']), 3)
+                    metrics['summary']['avg_memory_gb'] = round(sum(all_memory_stats['avg']) / len(all_memory_stats['avg']), 3)
+                
+                if all_cpu_stats['avg']:
+                    metrics['summary']['total_cpu_cores'] = round(sum(all_cpu_stats['avg']), 4)
+                    metrics['summary']['avg_cpu_cores'] = round(sum(all_cpu_stats['avg']) / len(all_cpu_stats['avg']), 4)
+                
+        except Exception as e:
+            self.logger.warning(f"Error collecting DataNode metrics: {e}")
+            metrics = {"datanode_pods": [], "summary": {}}
         
         return metrics
 
@@ -151,108 +219,204 @@ class PrometheusCollector:
         start_time: Optional[datetime] = None, 
         end_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        """Get S3/MinIO IOPS and throughput metrics with optional time range support."""
-        metrics = {}
+        """Get S3/MinIO IOPS and throughput metrics for each pod separately."""
+        metrics = {
+            "minio_pods": [],
+            "summary": {}
+        }
         
-        # S3/MinIO IOPS using filesystem I/O operations
-        reads_query = f'sum(rate(container_fs_reads_total{{container!="", cluster="", namespace="{namespace}", pod=~".*minio.*"}}[5m]))'
-        writes_query = f'sum(rate(container_fs_writes_total{{container!="", cluster="", namespace="{namespace}", pod=~".*minio.*"}}[5m]))'
+        # S3/MinIO IOPS using filesystem I/O operations - per pod
+        reads_query = f'rate(container_fs_reads_total{{container!="", cluster="", namespace="{namespace}", pod=~"{release_name}-minio-.*"}}[5m])'
+        writes_query = f'rate(container_fs_writes_total{{container!="", cluster="", namespace="{namespace}", pod=~"{release_name}-minio-.*"}}[5m])'
         
-        if start_time and end_time:
-            try:
-                total_iops_values = []
-                
-                # Get reads over time
-                result = self.query_prometheus_range(reads_query, start_time, end_time)
-                reads_values = []
-                if result['data']['result']:
-                    for series in result['data']['result']:
-                        for timestamp, value in series['values']:
-                            reads_values.append(float(value))
-                
-                # Get writes over time
-                result = self.query_prometheus_range(writes_query, start_time, end_time)
-                writes_values = []
-                if result['data']['result']:
-                    for series in result['data']['result']:
-                        for timestamp, value in series['values']:
-                            writes_values.append(float(value))
-                
-                # Combine reads and writes
-                max_len = max(len(reads_values), len(writes_values))
-                for i in range(max_len):
-                    reads = reads_values[i] if i < len(reads_values) else 0
-                    writes = writes_values[i] if i < len(writes_values) else 0
-                    total_iops_values.append(reads + writes)
-                
-                iops_stats = self.calculate_stats(total_iops_values)
-                metrics['s3_minio_iops'] = iops_stats
-            except Exception as e:
-                self.logger.warning(f"Error querying S3/MinIO IOPS range: {e}")
-                metrics['s3_minio_iops'] = {"min": 0, "max": 0, "avg": 0}
-        else:
-            try:
-                total_iops = 0
-                
-                # Get reads
-                result = self.query_prometheus(reads_query)
-                if result['data']['result']:
-                    total_iops += float(result['data']['result'][0]['value'][1])
-                
-                # Get writes
-                result = self.query_prometheus(writes_query)
-                if result['data']['result']:
-                    total_iops += float(result['data']['result'][0]['value'][1])
-                
-                metrics['s3_minio_iops'] = total_iops
-            except Exception as e:
-                self.logger.warning(f"Error querying S3/MinIO IOPS: {e}")
-                # Fallback to S3 API requests
-                try:
-                    iops_query = 'sum(rate(minio_s3_requests_total[5m]))'
-                    result = self.query_prometheus(iops_query)
-                    if result['data']['result']:
-                        metrics['s3_minio_iops'] = float(result['data']['result'][0]['value'][1])
-                    else:
-                        metrics['s3_minio_iops'] = 0
-                except:
-                    metrics['s3_minio_iops'] = 0
+        # Throughput queries - per pod
+        read_bytes_query = f'rate(container_fs_reads_bytes_total{{container!="", cluster="", namespace="{namespace}", pod=~"{release_name}-minio-.*"}}[5m])'
+        write_bytes_query = f'rate(container_fs_writes_bytes_total{{container!="", cluster="", namespace="{namespace}", pod=~"{release_name}-minio-.*"}}[5m])'
         
-        # S3/MinIO Throughput (bytes/sec -> MB/sec)
-        throughput_queries = [
-            'sum(rate(minio_s3_traffic_sent_bytes[5m])) + sum(rate(minio_s3_traffic_received_bytes[5m]))',
-            'sum(rate(minio_inter_node_traffic_sent_bytes[5m])) + sum(rate(minio_inter_node_traffic_received_bytes[5m]))',
-            'sum(rate(minio_bucket_traffic_sent_bytes[5m])) + sum(rate(minio_bucket_traffic_received_bytes[5m]))'
-        ]
-        
-        for query in throughput_queries:
-            try:
-                if start_time and end_time:
-                    result = self.query_prometheus_range(query, start_time, end_time)
-                    if result['data']['result']:
-                        all_values = []
-                        for series in result['data']['result']:
-                            for timestamp, value in series['values']:
-                                bytes_per_sec = float(value)
-                                all_values.append(bytes_per_sec / (1024 * 1024))  # Convert to MB/s
-                        
-                        throughput_stats = self.calculate_stats(all_values)
-                        metrics['s3_minio_throughput_mbps'] = throughput_stats
-                        break
-                else:
-                    result = self.query_prometheus(query)
-                    if result['data']['result']:
-                        bytes_per_sec = float(result['data']['result'][0]['value'][1])
-                        metrics['s3_minio_throughput_mbps'] = bytes_per_sec / (1024 * 1024)  # Convert to MB/s
-                        break
-            except Exception:
-                continue
-        
-        if 's3_minio_throughput_mbps' not in metrics:
+        try:
+            # Use time range queries if available, otherwise single point
             if start_time and end_time:
-                metrics['s3_minio_throughput_mbps'] = {"min": 0, "max": 0, "avg": 0}
+                reads_result = self.query_prometheus_range(reads_query, start_time, end_time)
+                writes_result = self.query_prometheus_range(writes_query, start_time, end_time)
+                read_bytes_result = self.query_prometheus_range(read_bytes_query, start_time, end_time)
+                write_bytes_result = self.query_prometheus_range(write_bytes_query, start_time, end_time)
+                use_time_range = True
             else:
-                metrics['s3_minio_throughput_mbps'] = 0
+                reads_result = self.query_prometheus(reads_query)
+                writes_result = self.query_prometheus(writes_query)
+                read_bytes_result = self.query_prometheus(read_bytes_query)
+                write_bytes_result = self.query_prometheus(write_bytes_query)
+                use_time_range = False
+            
+            # Group by pod
+            pod_metrics = {}
+            
+            # Process reads IOPS
+            if reads_result['data']['result']:
+                for series in reads_result['data']['result']:
+                    pod_name = series['metric'].get('pod', 'unknown')
+                    container = series['metric'].get('container', 'unknown')
+                    
+                    if pod_name not in pod_metrics:
+                        pod_metrics[pod_name] = {'pod_name': pod_name, 'containers': {}}
+                    
+                    if container not in pod_metrics[pod_name]['containers']:
+                        if use_time_range:
+                            pod_metrics[pod_name]['containers'][container] = {
+                                'reads_per_sec': {'min': 0, 'max': 0, 'avg': 0}, 
+                                'writes_per_sec': {'min': 0, 'max': 0, 'avg': 0},
+                                'read_mbps': {'min': 0, 'max': 0, 'avg': 0}, 
+                                'write_mbps': {'min': 0, 'max': 0, 'avg': 0}
+                            }
+                        else:
+                            pod_metrics[pod_name]['containers'][container] = {
+                                'reads_per_sec': 0, 'writes_per_sec': 0,
+                                'read_mbps': 0, 'write_mbps': 0
+                            }
+                    
+                    if use_time_range:
+                        reads_values = [float(v) for t, v in series['values']]
+                        reads_stats = self.calculate_stats(reads_values) if reads_values else {'min': 0, 'max': 0, 'avg': 0}
+                        pod_metrics[pod_name]['containers'][container]['reads_per_sec'] = reads_stats
+                    else:
+                        reads_per_sec = float(series['value'][1])
+                        pod_metrics[pod_name]['containers'][container]['reads_per_sec'] = round(reads_per_sec, 2)
+            
+            # Process writes IOPS
+            if writes_result['data']['result']:
+                for series in writes_result['data']['result']:
+                    pod_name = series['metric'].get('pod', 'unknown')
+                    container = series['metric'].get('container', 'unknown')
+                    
+                    if pod_name in pod_metrics and container in pod_metrics[pod_name]['containers']:
+                        if use_time_range:
+                            writes_values = [float(v) for t, v in series['values']]
+                            writes_stats = self.calculate_stats(writes_values) if writes_values else {'min': 0, 'max': 0, 'avg': 0}
+                            pod_metrics[pod_name]['containers'][container]['writes_per_sec'] = writes_stats
+                        else:
+                            writes_per_sec = float(series['value'][1])
+                            pod_metrics[pod_name]['containers'][container]['writes_per_sec'] = round(writes_per_sec, 2)
+            
+            # Process read throughput
+            if read_bytes_result['data']['result']:
+                for series in read_bytes_result['data']['result']:
+                    pod_name = series['metric'].get('pod', 'unknown')
+                    container = series['metric'].get('container', 'unknown')
+                    
+                    if pod_name in pod_metrics and container in pod_metrics[pod_name]['containers']:
+                        if use_time_range:
+                            read_mbps_values = [float(v) / (1024 * 1024) for t, v in series['values']]
+                            read_mbps_stats = self.calculate_stats(read_mbps_values) if read_mbps_values else {'min': 0, 'max': 0, 'avg': 0}
+                            pod_metrics[pod_name]['containers'][container]['read_mbps'] = read_mbps_stats
+                        else:
+                            read_mbps = float(series['value'][1]) / (1024 * 1024)
+                            pod_metrics[pod_name]['containers'][container]['read_mbps'] = round(read_mbps, 2)
+            
+            # Process write throughput
+            if write_bytes_result['data']['result']:
+                for series in write_bytes_result['data']['result']:
+                    pod_name = series['metric'].get('pod', 'unknown')
+                    container = series['metric'].get('container', 'unknown')
+                    
+                    if pod_name in pod_metrics and container in pod_metrics[pod_name]['containers']:
+                        if use_time_range:
+                            write_mbps_values = [float(v) / (1024 * 1024) for t, v in series['values']]
+                            write_mbps_stats = self.calculate_stats(write_mbps_values) if write_mbps_values else {'min': 0, 'max': 0, 'avg': 0}
+                            pod_metrics[pod_name]['containers'][container]['write_mbps'] = write_mbps_stats
+                        else:
+                            write_mbps = float(series['value'][1]) / (1024 * 1024)
+                            pod_metrics[pod_name]['containers'][container]['write_mbps'] = round(write_mbps, 2)
+            
+            # Convert to list format and calculate summary
+            all_iops_stats = {'min': [], 'max': [], 'avg': []}
+            all_throughput_stats = {'min': [], 'max': [], 'avg': []}
+            
+            for pod_name, pod_data in pod_metrics.items():
+                pod_info = {
+                    'pod_name': pod_name,
+                    'containers': [],
+                    'use_time_range': use_time_range
+                }
+                
+                for container, container_data in pod_data['containers'].items():
+                    if use_time_range:
+                        # Calculate totals from stats
+                        total_iops_stats = {
+                            'min': container_data['reads_per_sec']['min'] + container_data['writes_per_sec']['min'],
+                            'max': container_data['reads_per_sec']['max'] + container_data['writes_per_sec']['max'],
+                            'avg': container_data['reads_per_sec']['avg'] + container_data['writes_per_sec']['avg']
+                        }
+                        total_throughput_stats = {
+                            'min': container_data['read_mbps']['min'] + container_data['write_mbps']['min'],
+                            'max': container_data['read_mbps']['max'] + container_data['write_mbps']['max'],
+                            'avg': container_data['read_mbps']['avg'] + container_data['write_mbps']['avg']
+                        }
+                        
+                        pod_info['containers'].append({
+                            'container_name': container,
+                            'reads_per_sec': container_data['reads_per_sec'],
+                            'writes_per_sec': container_data['writes_per_sec'],
+                            'total_iops': total_iops_stats,
+                            'read_mbps': container_data['read_mbps'],
+                            'write_mbps': container_data['write_mbps'],
+                            'total_throughput_mbps': total_throughput_stats
+                        })
+                        
+                        all_iops_stats['min'].append(total_iops_stats['min'])
+                        all_iops_stats['max'].append(total_iops_stats['max'])
+                        all_iops_stats['avg'].append(total_iops_stats['avg'])
+                        all_throughput_stats['min'].append(total_throughput_stats['min'])
+                        all_throughput_stats['max'].append(total_throughput_stats['max'])
+                        all_throughput_stats['avg'].append(total_throughput_stats['avg'])
+                    else:
+                        # Single values
+                        total_iops = container_data['reads_per_sec'] + container_data['writes_per_sec']
+                        total_throughput = container_data['read_mbps'] + container_data['write_mbps']
+                        
+                        pod_info['containers'].append({
+                            'container_name': container,
+                            'reads_per_sec': container_data['reads_per_sec'],
+                            'writes_per_sec': container_data['writes_per_sec'],
+                            'total_iops': round(total_iops, 2),
+                            'read_mbps': container_data['read_mbps'],
+                            'write_mbps': container_data['write_mbps'],
+                            'total_throughput_mbps': round(total_throughput, 2)
+                        })
+                        
+                        all_iops_stats['avg'].append(total_iops)
+                        all_throughput_stats['avg'].append(total_throughput)
+                
+                metrics['minio_pods'].append(pod_info)
+            
+            # Calculate summary statistics
+            if use_time_range:
+                if all_iops_stats['avg']:
+                    metrics['summary']['iops'] = {
+                        'total_avg': round(sum(all_iops_stats['avg']), 2),
+                        'min': round(min(all_iops_stats['min']), 2),
+                        'max': round(max(all_iops_stats['max']), 2),
+                        'avg': round(sum(all_iops_stats['avg']) / len(all_iops_stats['avg']), 2)
+                    }
+                
+                if all_throughput_stats['avg']:
+                    metrics['summary']['throughput_mbps'] = {
+                        'total_avg': round(sum(all_throughput_stats['avg']), 2),
+                        'min': round(min(all_throughput_stats['min']), 2),
+                        'max': round(max(all_throughput_stats['max']), 2),
+                        'avg': round(sum(all_throughput_stats['avg']) / len(all_throughput_stats['avg']), 2)
+                    }
+            else:
+                if all_iops_stats['avg']:
+                    metrics['summary']['total_iops'] = round(sum(all_iops_stats['avg']), 2)
+                    metrics['summary']['avg_iops'] = round(sum(all_iops_stats['avg']) / len(all_iops_stats['avg']), 2)
+                
+                if all_throughput_stats['avg']:
+                    metrics['summary']['total_throughput_mbps'] = round(sum(all_throughput_stats['avg']), 2)
+                    metrics['summary']['avg_throughput_mbps'] = round(sum(all_throughput_stats['avg']) / len(all_throughput_stats['avg']), 2)
+                
+        except Exception as e:
+            self.logger.warning(f"Error collecting S3/MinIO metrics: {e}")
+            metrics = {"minio_pods": [], "summary": {}}
         
         return metrics
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,8 @@ class ReportGenerator:
         test_scenario: Optional[str] = None,
         notes: Optional[str] = None,
         release_name: Optional[str] = None,
-        milvus_namespace: Optional[str] = None
+        milvus_namespace: Optional[str] = None,
+        import_info_file: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate import performance report.
         
@@ -89,6 +91,13 @@ class ReportGenerator:
         
         # Extract additional information from logs
         import_info = self._extract_import_info(all_timing_data)
+        
+        # Load additional metadata from import_info.json if provided
+        if import_info_file:
+            import_metadata = self._load_import_metadata(import_info_file)
+            if import_metadata:
+                # Merge metadata into import_info
+                import_info.update(import_metadata)
         
         # Collect Prometheus metrics if release_name and namespace provided
         if release_name and milvus_namespace and self.config.prometheus_url:
@@ -318,6 +327,109 @@ class ReportGenerator:
         
         return info
     
+    def _load_import_metadata(self, import_info_file: str) -> Dict[str, Any]:
+        """Load metadata from import_info.json file."""
+        try:
+            with open(import_info_file, 'r') as f:
+                metadata = json.load(f)
+            
+            # Extract relevant fields for the report
+            extracted_info = {}
+            
+            # Initialize file_info
+            extracted_info['file_info'] = {
+                'file_count': metadata.get('total_files', 0),
+                'total_size': 0,
+                'file_sizes': [],
+                'binlog_count': 0,
+                'binlog_size': 0
+            }
+            
+            if 'file_types' in metadata:
+                extracted_info['file_type'] = ', '.join(metadata['file_types'])
+            
+            # Schema information - use collection name as schema info
+            if 'collection_name' in metadata:
+                extracted_info['collection_schema'] = {'name': metadata['collection_name']}
+                # Also preserve collection_name for backward compatibility
+                extracted_info['collection_name'] = metadata['collection_name']
+            
+            # Try to find total rows from meta.json file by searching common patterns
+            meta_paths_to_try = [
+                '/tmp/test_data_*/meta.json',
+                'test_data_*/meta.json', 
+                './test_data_*/meta.json',
+                '../test_data_*/meta.json',
+                'meta.json',
+                './meta.json'
+            ]
+            
+            for meta_pattern in meta_paths_to_try:
+                if '*' in meta_pattern:
+                    # Use glob to find matching files
+                    matched_files = list(Path('/').glob(meta_pattern.lstrip('/')))
+                    # Sort by modification time, newest first
+                    matched_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                    
+                    for meta_path in matched_files:
+                        if meta_path.exists():
+                            try:
+                                with open(meta_path, 'r') as mf:
+                                    meta_data = json.load(mf)
+                                
+                                # Check if this meta.json matches our collection
+                                schema_collection_name = meta_data.get('schema', {}).get('collection_name', '')
+                                current_collection_name = extracted_info.get('collection_name', '')
+                                
+                                if 'generation_info' in meta_data:
+                                    gen_info = meta_data['generation_info']
+                                    
+                                    # If collection names match, prioritize this file
+                                    if schema_collection_name == current_collection_name or not current_collection_name:
+                                        if 'total_rows' in gen_info:
+                                            extracted_info['total_rows'] = gen_info['total_rows']
+                                        if 'data_files' in gen_info:
+                                            data_files = gen_info['data_files']
+                                            extracted_info['file_info']['file_count'] = len(data_files)
+                                            total_size = sum(f.get('file_size_bytes', 0) for f in data_files)
+                                            extracted_info['file_info']['total_size'] = total_size
+                                        self.logger.info(f"Successfully loaded meta.json from {meta_path} (collection: {schema_collection_name})")
+                                        break
+                            except Exception as e:
+                                self.logger.debug(f"Could not load meta.json from {meta_path}: {e}")
+                else:
+                    # Try relative to import_info.json file location
+                    import_dir = Path(import_info_file).parent
+                    meta_path = import_dir / meta_pattern
+                    if meta_path.exists():
+                        try:
+                            with open(meta_path, 'r') as mf:
+                                meta_data = json.load(mf)
+                            if 'generation_info' in meta_data:
+                                gen_info = meta_data['generation_info']
+                                if 'total_rows' in gen_info:
+                                    extracted_info['total_rows'] = gen_info['total_rows']
+                                if 'data_files' in gen_info:
+                                    data_files = gen_info['data_files']
+                                    extracted_info['file_info']['file_count'] = len(data_files)
+                                    total_size = sum(f.get('file_size_bytes', 0) for f in data_files)
+                                    extracted_info['file_info']['total_size'] = total_size
+                                self.logger.info(f"Successfully loaded meta.json from {meta_path}")
+                                break
+                        except Exception as e:
+                            self.logger.debug(f"Could not load meta.json from {meta_path}: {e}")
+                
+                # Break out of outer loop if we found data
+                if 'total_rows' in extracted_info:
+                    break
+            
+            self.logger.info(f"Loaded import metadata: {extracted_info}")
+            return extracted_info
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load import metadata from {import_info_file}: {e}")
+            return {}
+    
     def _convert_to_bytes(self, size: float, unit: str) -> float:
         """Convert size to bytes."""
         unit = unit.upper()
@@ -361,10 +473,8 @@ class ReportGenerator:
                 'Stats Time (s)',
                 'Build Index Time (s)',
                 'L0 Import Time (s)',
-                'DataNode Memory',       # DataNode内存
-                'DataNode CPU',          # DataNode CPU
-                'S3/MinIO IOPS',        # S3/MinIO IOPS
-                'S3/MinIO Throughput (MB/s)',  # S3/MinIO吞吐量
+                'DataNode Pods Details', # DataNode每个pod详情
+                'MinIO Pods Details',    # MinIO每个pod详情
                 'File Count',
                 'Total File Size (GB)',
                 'Binlog Count',          # Binlog数量
@@ -376,38 +486,25 @@ class ReportGenerator:
             writer.writeheader()
             
             for job_id, summary in job_summaries.items():
-                # Format DataNode memory
-                datanode_memory = self._format_prometheus_metric(
-                    datanode_metrics.get('datanode_memory_gb', 0), 
-                    is_time_range, 
-                    unit='GB'
-                )
+                # Format DataNode pod details
+                datanode_details = self._format_datanode_details(datanode_metrics)
                 
-                # Format DataNode CPU
-                datanode_cpu = self._format_prometheus_metric(
-                    datanode_metrics.get('datanode_cpu_cores', 0), 
-                    is_time_range, 
-                    unit='cores'
-                )
+                # Format MinIO pod details
+                minio_details = self._format_minio_details(s3_metrics)
                 
-                # Format S3/MinIO IOPS
-                s3_iops = self._format_prometheus_metric(
-                    s3_metrics.get('s3_minio_iops', 0), 
-                    is_time_range, 
-                    unit='req/s'
-                )
-                
-                # Format S3/MinIO throughput
-                s3_throughput = self._format_prometheus_metric(
-                    s3_metrics.get('s3_minio_throughput_mbps', 0), 
-                    is_time_range, 
-                    unit='MB/s'
-                )
+                # Use collection schema name if available, otherwise fall back to collection_name
+                collection_display_name = ""
+                if 'collection_schema' in import_info and 'name' in import_info['collection_schema']:
+                    collection_display_name = import_info['collection_schema']['name']
+                elif 'collection_name' in import_info:
+                    collection_display_name = import_info['collection_name']
+                else:
+                    collection_display_name = summary.get('collection_name', '')
                 
                 row = {
                     'Test Scenario': import_info.get('test_scenario', ''),
                     'Job ID': job_id,
-                    'Collection Name': summary.get('collection_name', ''),
+                    'Collection Name': collection_display_name,
                     'Total Rows': import_info.get('total_rows', 0),
                     'File Type': import_info.get('file_type', ''),
                     'Import Result': import_info.get('import_result', 'success'),
@@ -418,10 +515,8 @@ class ReportGenerator:
                     'Stats Time (s)': f"{summary.get('phases', {}).get('stats_done', 0):.2f}",
                     'Build Index Time (s)': f"{summary.get('phases', {}).get('build_index_done', 0):.2f}",
                     'L0 Import Time (s)': f"{summary.get('phases', {}).get('l0_import_done', 0):.6f}",
-                    'DataNode Memory': datanode_memory,
-                    'DataNode CPU': datanode_cpu,
-                    'S3/MinIO IOPS': s3_iops,
-                    'S3/MinIO Throughput (MB/s)': s3_throughput,
+                    'DataNode Pods Details': datanode_details,
+                    'MinIO Pods Details': minio_details,
                     'File Count': import_info['file_info']['file_count'],
                     'Total File Size (GB)': f"{import_info['file_info']['total_size'] / (1024**3):.2f}",
                     'Binlog Count': binlog_metrics.get('binlog_count', import_info['file_info'].get('binlog_count', 0)),
@@ -431,6 +526,84 @@ class ReportGenerator:
                 writer.writerow(row)
         
         self.logger.info(f"CSV report written to {output_path}")
+    
+    def _format_datanode_details(self, datanode_metrics: Dict[str, Any]) -> str:
+        """Format DataNode pod details for CSV display."""
+        if not datanode_metrics or not datanode_metrics.get('datanode_pods'):
+            return ""
+        
+        details = []
+        use_time_range = datanode_metrics.get('datanode_pods', [{}])[0].get('use_time_range', False)
+        
+        for pod in datanode_metrics['datanode_pods']:
+            pod_name = pod['pod_name']
+            pod_details = []
+            
+            for container in pod['containers']:
+                if use_time_range and isinstance(container['memory_gb'], dict):
+                    # Time range format: min/avg/max with clear labels
+                    memory_str = f"mem(min:{container['memory_gb']['min']:.2f}/avg:{container['memory_gb']['avg']:.2f}/max:{container['memory_gb']['max']:.2f}GB)"
+                    cpu_str = f"cpu(min:{container['cpu_cores']['min']:.3f}/avg:{container['cpu_cores']['avg']:.3f}/max:{container['cpu_cores']['max']:.3f}cores)"
+                    container_info = f"{container['container_name']}: {memory_str}, {cpu_str}"
+                else:
+                    # Single value format
+                    container_info = f"{container['container_name']}: {container['memory_gb']:.2f}GB, {container['cpu_cores']:.3f}cores"
+                pod_details.append(container_info)
+            
+            pod_summary = f"{pod_name}[{'; '.join(pod_details)}]"
+            details.append(pod_summary)
+        
+        # Add summary
+        summary = datanode_metrics.get('summary', {})
+        if summary:
+            if use_time_range and 'memory_gb' in summary and isinstance(summary['memory_gb'], dict):
+                memory_summary = f"mem(min:{summary['memory_gb']['min']:.2f}/avg:{summary['memory_gb']['avg']:.2f}/max:{summary['memory_gb']['max']:.2f}GB)"
+                cpu_summary = f"cpu(min:{summary['cpu_cores']['min']:.3f}/avg:{summary['cpu_cores']['avg']:.3f}/max:{summary['cpu_cores']['max']:.3f}cores)"
+                summary_str = f"Summary: {memory_summary}, {cpu_summary}"
+            else:
+                summary_str = f"Summary: {summary.get('total_memory_gb', 0):.2f}GB, {summary.get('total_cpu_cores', 0):.3f}cores"
+            details.append(summary_str)
+        
+        return " | ".join(details)
+    
+    def _format_minio_details(self, s3_metrics: Dict[str, Any]) -> str:
+        """Format MinIO pod details for CSV display."""
+        if not s3_metrics or not s3_metrics.get('minio_pods'):
+            return ""
+        
+        details = []
+        use_time_range = s3_metrics.get('minio_pods', [{}])[0].get('use_time_range', False)
+        
+        for pod in s3_metrics['minio_pods']:
+            pod_name = pod['pod_name']
+            pod_details = []
+            
+            for container in pod['containers']:
+                if use_time_range and isinstance(container['total_iops'], dict):
+                    # Time range format: min/avg/max with clear labels
+                    iops_str = f"iops(min:{container['total_iops']['min']:.1f}/avg:{container['total_iops']['avg']:.1f}/max:{container['total_iops']['max']:.1f})"
+                    throughput_str = f"throughput(min:{container['total_throughput_mbps']['min']:.1f}/avg:{container['total_throughput_mbps']['avg']:.1f}/max:{container['total_throughput_mbps']['max']:.1f}MB/s)"
+                    container_info = f"{container['container_name']}: {iops_str}, {throughput_str}"
+                else:
+                    # Single value format
+                    container_info = f"{container['container_name']}: {container['total_iops']:.1f}iops, {container['total_throughput_mbps']:.1f}MB/s"
+                pod_details.append(container_info)
+            
+            pod_summary = f"{pod_name}[{'; '.join(pod_details)}]"
+            details.append(pod_summary)
+        
+        # Add summary
+        summary = s3_metrics.get('summary', {})
+        if summary:
+            if use_time_range and 'iops' in summary and isinstance(summary['iops'], dict):
+                iops_summary = f"iops(min:{summary['iops']['min']:.1f}/avg:{summary['iops']['avg']:.1f}/max:{summary['iops']['max']:.1f})"
+                throughput_summary = f"throughput(min:{summary['throughput_mbps']['min']:.1f}/avg:{summary['throughput_mbps']['avg']:.1f}/max:{summary['throughput_mbps']['max']:.1f}MB/s)"
+                summary_str = f"Summary: {iops_summary}, {throughput_summary}"
+            else:
+                summary_str = f"Summary: {summary.get('total_iops', 0):.1f}iops, {summary.get('total_throughput_mbps', 0):.1f}MB/s"
+            details.append(summary_str)
+        
+        return " | ".join(details)
     
     def _format_prometheus_metric(self, metric_value, is_time_range: bool, unit: str = '') -> str:
         """Format Prometheus metric values for CSV output."""
