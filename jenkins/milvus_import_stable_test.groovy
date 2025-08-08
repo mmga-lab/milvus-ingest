@@ -574,78 +574,28 @@ EOF
                             exit 0
                         fi
                         
-                        # Load import information from structured JSON
-                        COLLECTION_NAME=\$(cat ${env.IMPORT_INFO} | jq -r '.collection_name // "${params.schema_type}"')
-                        
-                        # Handle job_ids as either array or string
-                        JOB_IDS_RAW=\$(cat ${env.IMPORT_INFO} | jq -r '.job_ids')
-                        if echo "\${JOB_IDS_RAW}" | jq -e 'type == "array"' > /dev/null 2>&1; then
-                            # job_ids is an array, join with commas
-                            JOB_IDS=\$(echo "\${JOB_IDS_RAW}" | jq -r 'join(",")')
-                        else
-                            # job_ids is already a string
-                            JOB_IDS="\${JOB_IDS_RAW}"
-                        fi
-                        
-                        IMPORT_START_TIME=\$(cat ${env.IMPORT_INFO} | jq -r '.import_start_time')
-                        IMPORT_END_TIME=\$(cat ${env.IMPORT_INFO} | jq -r '.import_end_time')
-                        IMPORT_STATUS=\$(cat ${env.IMPORT_INFO} | jq -r '.status // "unknown"')
-                        
-                        echo "Collection name: \${COLLECTION_NAME}"
-                        echo "Job IDs: \${JOB_IDS}"
-                        echo "Import time range: \${IMPORT_START_TIME} to \${IMPORT_END_TIME}"
-                        
-                        # Extend time range for report analysis (add 15 minutes before and after)
-                        REPORT_START_TIME=\$(date -u -d "\${IMPORT_START_TIME} - 15 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo \${IMPORT_START_TIME})
-                        REPORT_END_TIME=\$(date -u -d "\${IMPORT_END_TIME} + 15 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo \${IMPORT_END_TIME})
-                        
-                        echo "Extended report time range: \${REPORT_START_TIME} to \${REPORT_END_TIME}"
-                        
-                        # Get specific pod pattern and namespace for this deployment
+                        # Get deployment-specific parameters
                         if [ "${params.use_existing_instance}" = "true" ]; then
                             POD_PATTERN="${params.existing_release_name}.*"
                             REPORT_NAMESPACE="${params.existing_namespace}"
                             REPORT_RELEASE_NAME="${params.existing_release_name}"
-                            echo "Using existing instance for report generation:"
-                            echo "  Release Name: ${params.existing_release_name}"
-                            echo "  Namespace: ${params.existing_namespace}"
+                            echo "Using existing instance: ${params.existing_release_name} in ${params.existing_namespace}"
                         else
                             POD_PATTERN="${env.RELEASE_NAME}.*"
                             REPORT_NAMESPACE="${env.NAMESPACE}"
                             REPORT_RELEASE_NAME="${env.RELEASE_NAME}"
-                            echo "Using deployed instance for report generation:"
-                            echo "  Release Name: ${env.RELEASE_NAME}"
-                            echo "  Namespace: ${env.NAMESPACE}"
+                            echo "Using deployed instance: ${env.RELEASE_NAME} in ${env.NAMESPACE}"
                         fi
                         
-                        echo "Using pod pattern: \${POD_PATTERN} (namespace: \${REPORT_NAMESPACE})"
-                        
-                        # List actual pods for verification
                         echo "Pods matching pattern:"
                         kubectl get pods -n \${REPORT_NAMESPACE} -l app.kubernetes.io/instance=\${REPORT_RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
                         
-                        # Generate CSV performance report
+                        # Generate CSV performance report (let the CLI handle all the JSON parsing)
                         CSV_REPORT="${env.REPORT_DIR}/import-performance-summary-${env.BUILD_ID}.csv"
                         
-                        echo "Generating CSV performance report with Prometheus metrics..."
-                        # Parse job IDs - handle both single ID and comma-separated list
-                        if [[ "\${JOB_IDS}" == *","* ]]; then
-                            # Multiple job IDs - split and add --job-ids for each
-                            JOB_PARAMS=""
-                            IFS=',' read -ra JOB_ARRAY <<< "\${JOB_IDS}"
-                            for job_id in "\${JOB_ARRAY[@]}"; do
-                                JOB_PARAMS="\${JOB_PARAMS} --job-ids \${job_id}"
-                            done
-                        else
-                            # Single job ID
-                            JOB_PARAMS="--job-ids \${JOB_IDS}"
-                        fi
-                        
+                        echo "Generating performance report using import info file..."
                         pdm run milvus-ingest report generate \\
-                            \${JOB_PARAMS} \\
-                            --collection-name "\${COLLECTION_NAME}" \\
-                            --start-time "\${REPORT_START_TIME}" \\
-                            --end-time "\${REPORT_END_TIME}" \\
+                            --import-info-file "${env.IMPORT_INFO}" \\
                             --output "\${CSV_REPORT}" \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
@@ -654,7 +604,7 @@ EOF
                             --milvus-namespace "\${REPORT_NAMESPACE}" \\
                             --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
                             --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
-                            --timeout 60 || echo "CSV report generation failed, but continuing..."
+                            --timeout 60 || echo "Report generation failed, but continuing..."
                         
                         # Copy reports to Jenkins artifacts directory
                         mkdir -p ${env.ARTIFACTS}/reports
@@ -674,7 +624,6 @@ Build Information:
 
 Test Configuration:
 - Schema Type: ${params.schema_type}
-- Collection Name: \${COLLECTION_NAME}
 - File Count: ${params.file_count}
 - File Size: ${params.file_size}
 - File Format: ${params.file_format}
@@ -683,14 +632,9 @@ Test Configuration:
 - Shards: ${params.shard_count}
 - Upload Method: ${params.upload_method}
 
-Import Details:
-- Job IDs: \${JOB_IDS}
-- Import Start: \${IMPORT_START_TIME}
-- Import End: \${IMPORT_END_TIME}
-
 Report Files:
 - CSV Summary: import-performance-summary-${env.BUILD_ID}.csv
-- Import Info: import_info.json
+- Import Info: import_info.json (contains job IDs, timing, and collection details)
 
 Data Sources:
 - Loki URL: ${params.loki_url}
