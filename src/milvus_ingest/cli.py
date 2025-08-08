@@ -1559,6 +1559,11 @@ def generate_report(
     is_flag=True,
     help="Use MinIO Client (mc) CLI for uploads (prioritized over AWS CLI and boto3)",
 )
+@click.option(
+    "--output-import-info",
+    type=click.Path(path_type=Path),
+    help="Output import information to JSON file (job IDs, collection name, timing, etc.)",
+)
 def import_to_milvus(
     collection_name: str | None,
     local_path: Path,
@@ -1576,6 +1581,7 @@ def import_to_milvus(
     use_autoindex: bool = False,
     use_boto3: bool = False,
     use_mc: bool = False,
+    output_import_info: Path | None = None,
 ) -> None:
     """Upload data to S3/MinIO and bulk import to Milvus in one step.
 
@@ -1601,14 +1607,18 @@ def import_to_milvus(
     """
     from .milvus_importer import MilvusBulkImporter
     from .uploader import S3Uploader
+    import json
+    import os
+    from datetime import datetime
+
+    # Record import start time
+    import_start_time = datetime.now()
 
     try:
         # Load metadata from local path
         meta_file = local_path / "meta.json"
         if not meta_file.exists():
             raise FileNotFoundError(f"meta.json not found in {local_path}")
-
-        import json
 
         with open(meta_file) as f:
             metadata = json.load(f)
@@ -1679,13 +1689,20 @@ def import_to_milvus(
             print(f"✓ Job IDs: {', '.join(job_ids)}")
         print(f"✓ Collection: {final_collection_name}")
 
+        # Record import completion time
+        import_end_time = datetime.now()
+        
         # Wait for completion if requested
+        import_success = True
         if wait:
             # Use the new wait_for_multiple_jobs method
             success = importer.wait_for_multiple_jobs(job_ids, timeout=timeout or 600)
             if success:
                 print("✓ All imports completed successfully!")
+                import_success = True
             else:
+                print("✗ Some imports failed or timed out")
+                import_success = False
                 raise SystemExit(1)
         else:
             if len(job_ids) == 1:
@@ -1696,6 +1713,65 @@ def import_to_milvus(
                 print(
                     f"{len(job_ids)} import jobs are running asynchronously. Monitor with job IDs: {', '.join(job_ids)}"
                 )
+        
+        # Prepare import information structure
+        import_info = {
+            "status": "completed" if import_success else "failed",
+            "collection_name": final_collection_name,
+            "job_ids": job_ids,
+            "import_start_time": import_start_time.isoformat(),
+            "import_end_time": import_end_time.isoformat(),
+            "total_duration_seconds": (import_end_time - import_start_time).total_seconds(),
+            "milvus_uri": uri,
+            "milvus_token_used": bool(token.strip()),
+            "s3_bucket": bucket,
+            "s3_path": s3_path,
+            "s3_endpoint": endpoint_url,
+            "upload_method": "mc_cli" if use_mc else ("boto3" if use_boto3 else "aws_cli"),
+            "drop_if_exists": drop_if_exists,
+            "use_autoindex": use_autoindex,
+            "wait_for_completion": wait,
+            "timeout": timeout,
+            "total_files": len(data_files),
+            "file_types": list(set([f.split('.')[-1] for f in data_files])),
+            "schema_metadata": {
+                "schema_type": metadata.get("schema_type", "unknown"),
+                "fields_count": len(metadata.get("schema", {}).get("fields", [])),
+                "vector_fields": [
+                    f["name"] for f in metadata.get("schema", {}).get("fields", [])
+                    if f.get("type") in ["FLOAT_VECTOR", "BINARY_VECTOR", "SPARSE_FLOAT_VECTOR"]
+                ],
+                "has_dynamic_fields": any(
+                    f.get("is_dynamic", False) for f in metadata.get("schema", {}).get("fields", [])
+                ),
+                "has_partition_key": any(
+                    f.get("is_partition_key", False) for f in metadata.get("schema", {}).get("fields", [])
+                ),
+            },
+            "generation_metadata": metadata.get("generation", {}),
+        }
+        
+        # Output import info to file if requested
+        if output_import_info:
+            try:
+                # Ensure parent directory exists
+                output_import_info.parent.mkdir(parents=True, exist_ok=True)
+                
+                with open(output_import_info, 'w', encoding='utf-8') as f:
+                    json.dump(import_info, f, indent=2, ensure_ascii=False)
+                
+                print(f"✓ Import information saved to: {output_import_info}")
+            except Exception as e:
+                print(f"⚠ Failed to save import information: {e}")
+        
+        # Always print a summary line for easy parsing (can be parsed by Jenkins)
+        print(f"IMPORT_SUMMARY: {json.dumps({
+            'job_ids': ','.join(job_ids),
+            'collection_name': final_collection_name,
+            'status': 'completed' if import_success else 'failed',
+            'start_time': import_start_time.isoformat(),
+            'end_time': import_end_time.isoformat()
+        })}")
 
     except Exception as e:
         from .rich_display import display_error

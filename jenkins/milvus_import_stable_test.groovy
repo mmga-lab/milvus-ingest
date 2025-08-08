@@ -427,16 +427,8 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         mkdir -p ${env.REPORT_DIR}
                         mkdir -p ${env.ARTIFACTS}
                         
-                        # Extract collection name from meta.json for later use
-                        COLLECTION_NAME=\$(cat ${outputPath}/meta.json | jq -r '.schema.collection_name // .collection_name // "${params.schema_type}"')
-                        echo "Collection name: \${COLLECTION_NAME}"
-                        
-                        # Record import start time in RFC3339 format for report generation
-                        IMPORT_START_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                        echo "Import start time: \${IMPORT_START_TIME}"
-                        
                         # Import data to Milvus via MinIO from current workspace
-                        # Capture output to extract job IDs
+                        # Use the new --output-import-info option to get structured information
                         pdm run milvus-ingest to-milvus import \\
                             --local-path ${outputPath} \\
                             --s3-path test-data/${env.BUILD_ID} \\
@@ -448,54 +440,60 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --drop-if-exists \\
                             --wait \\
                             --timeout 4800 \\
-                            ${uploadFlags} | tee /tmp/import_output.log
+                            --output-import-info ${env.IMPORT_INFO} \\
+                            ${uploadFlags}
                         
-                        # Record import completion time
-                        IMPORT_END_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                        echo "Import end time: \${IMPORT_END_TIME}"
-                        
-                        # Extract job ID(s) from import output
-                        # Look for patterns like "Import job started: abc123def456" or "Job IDs: abc123,def456"
-                        JOB_IDS=\$(grep -E "(Import job started|Job IDs|job ID|job started)" /tmp/import_output.log | \\
-                            sed -E 's/.*([0-9a-f]{8,})/\\1/g' | \\
-                            tr '\\n' ',' | sed 's/,\$//')
-                        
-                        if [ -z "\${JOB_IDS}" ]; then
-                            # If we can't extract job IDs, use a fallback based on timestamp and build ID
-                            JOB_IDS="import-${env.BUILD_ID}-\$(date +%s)"
-                            echo "Warning: Could not extract job IDs from import output, using fallback: \${JOB_IDS}"
+                        # Verify the import info file was created and enhance it with Jenkins metadata
+                        if [ -f "${env.IMPORT_INFO}" ]; then
+                            echo "✓ Import information captured successfully"
+                            
+                            # Add Jenkins-specific metadata to the import info
+                            jq '. + {
+                                "jenkins_job": "${env.JOB_NAME}",
+                                "jenkins_build": "${env.BUILD_NUMBER}",
+                                "jenkins_build_id": "${env.BUILD_ID}",
+                                "jenkins_url": "${env.BUILD_URL}",
+                                "test_parameters": {
+                                    "schema_type": "${params.schema_type}",
+                                    "file_count": "${params.file_count}",
+                                    "file_size": "${params.file_size}",
+                                    "file_format": "${params.file_format}",
+                                    "storage_version": "${params.storage_version}",
+                                    "partition_count": "${params.partition_count}",
+                                    "shard_count": "${params.shard_count}",
+                                    "upload_method": "${params.upload_method}"
+                                }
+                            }' ${env.IMPORT_INFO} > ${env.IMPORT_INFO}.tmp && mv ${env.IMPORT_INFO}.tmp ${env.IMPORT_INFO}
+                            
+                            echo "Enhanced import info with Jenkins metadata:"
+                            cat ${env.IMPORT_INFO} | jq .
                         else
-                            echo "Extracted job IDs: \${JOB_IDS}"
-                        fi
-                        
-                        # Save import information to JSON file for report generation
-                        cat > ${env.IMPORT_INFO} << EOF
+                            echo "⚠ Warning: Import info file not created, generating fallback"
+                            # Create a minimal fallback info file
+                            cat > ${env.IMPORT_INFO} << EOF
 {
-    "build_id": "${env.BUILD_ID}",
-    "job_ids": "\${JOB_IDS}",
-    "collection_name": "\${COLLECTION_NAME}",
-    "schema_type": "${params.schema_type}",
-    "file_count": "${params.file_count}",
-    "file_size": "${params.file_size}",
-    "file_format": "${params.file_format}",
-    "storage_version": "${params.storage_version}",
-    "partition_count": "${params.partition_count}",
-    "shard_count": "${params.shard_count}",
-    "upload_method": "${params.upload_method}",
-    "import_start_time": "\${IMPORT_START_TIME}",
-    "import_end_time": "\${IMPORT_END_TIME}",
-    "milvus_uri": "${milvusUri}",
-    "minio_endpoint": "${minioEndpoint}",
-    "minio_bucket": "${minioBucket}",
-    "s3_path": "test-data/${env.BUILD_ID}",
+    "status": "unknown",
+    "collection_name": "${params.schema_type}",
+    "job_ids": ["fallback-${env.BUILD_ID}"],
+    "import_start_time": "\$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+    "import_end_time": "\$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
     "jenkins_job": "${env.JOB_NAME}",
     "jenkins_build": "${env.BUILD_NUMBER}",
-    "jenkins_url": "${env.BUILD_URL}"
+    "jenkins_build_id": "${env.BUILD_ID}",
+    "jenkins_url": "${env.BUILD_URL}",
+    "test_parameters": {
+        "schema_type": "${params.schema_type}",
+        "file_count": "${params.file_count}",
+        "file_size": "${params.file_size}",
+        "file_format": "${params.file_format}",
+        "storage_version": "${params.storage_version}",
+        "partition_count": "${params.partition_count}",
+        "shard_count": "${params.shard_count}",
+        "upload_method": "${params.upload_method}"
+    }
 }
 EOF
-                        
-                        echo "Import information saved to ${env.IMPORT_INFO}"
-                        cat ${env.IMPORT_INFO}
+                        fi
                         
                         echo "Import completed successfully using ${params.upload_method} method"
                         """
@@ -558,11 +556,22 @@ EOF
                             exit 0
                         fi
                         
-                        # Load import information
+                        # Load import information from structured JSON
                         COLLECTION_NAME=\$(cat ${env.IMPORT_INFO} | jq -r '.collection_name // "${params.schema_type}"')
-                        JOB_IDS=\$(cat ${env.IMPORT_INFO} | jq -r '.job_ids // "unknown"')
+                        
+                        # Handle job_ids as either array or string
+                        JOB_IDS_RAW=\$(cat ${env.IMPORT_INFO} | jq -r '.job_ids')
+                        if echo "\${JOB_IDS_RAW}" | jq -e 'type == "array"' > /dev/null 2>&1; then
+                            # job_ids is an array, join with commas
+                            JOB_IDS=\$(echo "\${JOB_IDS_RAW}" | jq -r 'join(",")')
+                        else
+                            # job_ids is already a string
+                            JOB_IDS="\${JOB_IDS_RAW}"
+                        fi
+                        
                         IMPORT_START_TIME=\$(cat ${env.IMPORT_INFO} | jq -r '.import_start_time')
                         IMPORT_END_TIME=\$(cat ${env.IMPORT_INFO} | jq -r '.import_end_time')
+                        IMPORT_STATUS=\$(cat ${env.IMPORT_INFO} | jq -r '.status // "unknown"')
                         
                         echo "Collection name: \${COLLECTION_NAME}"
                         echo "Job IDs: \${JOB_IDS}"
