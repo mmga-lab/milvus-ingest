@@ -22,14 +22,14 @@ pipeline {
             defaultValue: false
         )
         string(
-            description: 'Milvus URI (required if use_existing_instance is true)',
-            name: 'milvus_uri',
-            defaultValue: 'http://10.255.11.79:19530'
+            description: 'Existing Milvus release name (when use_existing_instance is true)',
+            name: 'existing_release_name',
+            defaultValue: 'long-run-data-verify'
         )
         string(
-            description: 'MinIO Endpoint URL (required if use_existing_instance is true)',
-            name: 'minio_endpoint',
-            defaultValue: 'http://10.255.194.30:9000'
+            description: 'Existing Milvus namespace (when use_existing_instance is true)',
+            name: 'existing_namespace',
+            defaultValue: 'qa-tools'
         )
         string(
             description: 'MinIO Access Key (required if use_existing_instance is true)',
@@ -188,17 +188,32 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             steps {
                 container('main') {
                     script {
-                        if (!params.milvus_uri || params.milvus_uri.trim().isEmpty()) {
-                            error("Milvus URI is required when using existing instance")
+                        if (!params.existing_release_name || params.existing_release_name.trim().isEmpty()) {
+                            error("Existing release name is required when using existing instance")
                         }
-                        if (!params.minio_endpoint || params.minio_endpoint.trim().isEmpty()) {
-                            error("MinIO endpoint is required when using existing instance")
+                        if (!params.existing_namespace || params.existing_namespace.trim().isEmpty()) {
+                            error("Existing namespace is required when using existing instance")
                         }
                         
                         echo "Using existing Milvus instance:"
-                        echo "  Milvus URI: ${params.milvus_uri}"
-                        echo "  MinIO Endpoint: ${params.minio_endpoint}"
+                        echo "  Release Name: ${params.existing_release_name}"
+                        echo "  Namespace: ${params.existing_namespace}"
                         echo "  MinIO Bucket: ${params.minio_bucket}"
+                        
+                        // Verify the existing instance is accessible
+                        echo "Verifying existing Milvus instance..."
+                        sh """
+                        # Check if the services exist in the specified namespace
+                        kubectl get svc/${params.existing_release_name}-milvus -n ${params.existing_namespace} --no-headers || {
+                            echo "ERROR: Milvus service '${params.existing_release_name}-milvus' not found in namespace '${params.existing_namespace}'"
+                            exit 1
+                        }
+                        kubectl get svc/${params.existing_release_name}-minio -n ${params.existing_namespace} --no-headers || {
+                            echo "ERROR: MinIO service '${params.existing_release_name}-minio' not found in namespace '${params.existing_namespace}'"
+                            exit 1
+                        }
+                        echo "✅ Both Milvus and MinIO services found in the specified namespace"
+                        """
                     }
                 }
             }
@@ -384,12 +399,14 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         def minioBucket = params.minio_bucket
                         
                         if (params.use_existing_instance) {
-                            // Use provided URIs
-                            milvusUri = params.milvus_uri
-                            minioEndpoint = params.minio_endpoint
+                            // Get URIs from existing services using release name and namespace
+                            def host = sh(returnStdout: true, script: "kubectl get svc/${params.existing_release_name}-milvus -n ${params.existing_namespace} -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                            def minioHost = sh(returnStdout: true, script: "kubectl get svc/${params.existing_release_name}-minio -n ${params.existing_namespace} -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                            milvusUri = "http://${host}:19530"
+                            minioEndpoint = "http://${minioHost}:9000"
                             
                             if (!milvusUri || !minioEndpoint) {
-                                error("Milvus URI and MinIO endpoint must be provided when using existing instance")
+                                error("Could not retrieve service IPs from existing instance")
                             }
                         } else {
                             // Get URIs from deployed services
@@ -513,7 +530,8 @@ EOF
                         def milvusUri = ""
                         
                         if (params.use_existing_instance) {
-                            milvusUri = params.milvus_uri
+                            def host = sh(returnStdout: true, script: "kubectl get svc/${params.existing_release_name}-milvus -n ${params.existing_namespace} -o jsonpath=\"{.spec.clusterIP}\"").trim()
+                            milvusUri = "http://${host}:19530"
                         } else {
                             def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
                             milvusUri = "http://${host}:19530"
@@ -583,13 +601,28 @@ EOF
                         
                         echo "Extended report time range: \${REPORT_START_TIME} to \${REPORT_END_TIME}"
                         
-                        # Get specific pod pattern for this deployment
-                        POD_PATTERN="${env.RELEASE_NAME}.*"
-                        echo "Using pod pattern: \${POD_PATTERN} (namespace: ${env.NAMESPACE})"
+                        # Get specific pod pattern and namespace for this deployment
+                        if [ "${params.use_existing_instance}" = "true" ]; then
+                            POD_PATTERN="${params.existing_release_name}.*"
+                            REPORT_NAMESPACE="${params.existing_namespace}"
+                            REPORT_RELEASE_NAME="${params.existing_release_name}"
+                            echo "Using existing instance for report generation:"
+                            echo "  Release Name: ${params.existing_release_name}"
+                            echo "  Namespace: ${params.existing_namespace}"
+                        else
+                            POD_PATTERN="${env.RELEASE_NAME}.*"
+                            REPORT_NAMESPACE="${env.NAMESPACE}"
+                            REPORT_RELEASE_NAME="${env.RELEASE_NAME}"
+                            echo "Using deployed instance for report generation:"
+                            echo "  Release Name: ${env.RELEASE_NAME}"
+                            echo "  Namespace: ${env.NAMESPACE}"
+                        fi
+                        
+                        echo "Using pod pattern: \${POD_PATTERN} (namespace: \${REPORT_NAMESPACE})"
                         
                         # List actual pods for verification
-                        echo "Deployed pods matching pattern:"
-                        kubectl get pods -n ${env.NAMESPACE} -l app.kubernetes.io/instance=${env.RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
+                        echo "Pods matching pattern:"
+                        kubectl get pods -n \${REPORT_NAMESPACE} -l app.kubernetes.io/instance=\${REPORT_RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
                         
                         # Generate CSV performance report
                         CSV_REPORT="${env.REPORT_DIR}/import-performance-summary-${env.BUILD_ID}.csv"
@@ -617,8 +650,8 @@ EOF
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
                             --pod-pattern "\${POD_PATTERN}" \\
-                            --release-name "${env.RELEASE_NAME}" \\
-                            --milvus-namespace "${env.NAMESPACE}" \\
+                            --release-name "\${REPORT_RELEASE_NAME}" \\
+                            --milvus-namespace "\${REPORT_NAMESPACE}" \\
                             --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
                             --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
                             --timeout 60 || echo "CSV report generation failed, but continuing..."
@@ -681,22 +714,24 @@ EOF
             echo 'Upload logs and cleanup'
             container('main') {
                 script {
-                    if (params.use_existing_instance == false) {
-                        echo "Get pod status"
-                        sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
-                        
-                        // Collect logs using kubectl
-                        sh """
-                        mkdir -p k8s_log/${env.RELEASE_NAME}
-                        kubectl logs -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --all-containers=true --tail=-1 > k8s_log/${env.RELEASE_NAME}/milvus-logs.txt || true
-                        kubectl describe pods -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} > k8s_log/${env.RELEASE_NAME}/pod-descriptions.txt || true
-                        """
+                    // Collect logs from the appropriate instance
+                    def logReleaseName = params.use_existing_instance ? params.existing_release_name : env.RELEASE_NAME
+                    def logNamespace = params.use_existing_instance ? params.existing_namespace : env.NAMESPACE
+                    
+                    echo "Collecting logs from release: ${logReleaseName} in namespace: ${logNamespace}"
+                    sh "kubectl get pods -n ${logNamespace} -o wide | grep ${logReleaseName} || true"
+                    
+                    // Collect logs using kubectl
+                    sh """
+                    mkdir -p k8s_log/${logReleaseName}
+                    kubectl logs -l app.kubernetes.io/instance=${logReleaseName} -n ${logNamespace} --all-containers=true --tail=-1 > k8s_log/${logReleaseName}/milvus-logs.txt || true
+                    kubectl describe pods -l app.kubernetes.io/instance=${logReleaseName} -n ${logNamespace} > k8s_log/${logReleaseName}/pod-descriptions.txt || true
+                    """
 
-                        // Archive logs
-                        sh "tar -zcvf artifacts-${env.RELEASE_NAME}-server-logs.tar.gz k8s_log/ --remove-files || true"
+                    // Archive logs
+                    sh "tar -zcvf artifacts-${logReleaseName}-server-logs.tar.gz k8s_log/ --remove-files || true"
 
-                        archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-server-logs.tar.gz", allowEmptyArchive: true
-                    }
+                    archiveArtifacts artifacts: "artifacts-${logReleaseName}-server-logs.tar.gz", allowEmptyArchive: true
                     
                     // Always archive performance reports if they exist
                     if (fileExists("${env.ARTIFACTS}/reports/")) {
