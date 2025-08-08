@@ -24,12 +24,12 @@ pipeline {
         string(
             description: 'Existing Milvus release name (when use_existing_instance is true)',
             name: 'existing_release_name',
-            defaultValue: 'long-run-data-verify'
+            defaultValue: 'long-run-import-verify'
         )
         string(
             description: 'Existing Milvus namespace (when use_existing_instance is true)',
             name: 'existing_namespace',
-            defaultValue: 'qa-tools'
+            defaultValue: 'chaos-testing'
         )
         string(
             description: 'MinIO Access Key (required if use_existing_instance is true)',

@@ -116,6 +116,10 @@ class ReportConfig(BaseModel):
     job_id_pattern: Optional[str] = None
     pod_pattern: str = ".*"
     collection_name: Optional[str] = None
+    namespace: str = "chaos-testing"  # Kubernetes namespace for log queries
+    
+    # Deployment mode (cluster, standalone, or auto-detect)
+    deployment_mode: str = "auto"  # "auto", "cluster", or "standalone"
     
     # Time range
     start_time: Optional[datetime] = None

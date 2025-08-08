@@ -75,7 +75,7 @@ class LokiDataCollector:
             if job_id:
                 # Query specifically for jobTimeCost logs with the job ID
                 timing_logs = self._query_logs_direct(
-                    query=f'{{namespace="chaos-testing", pod=~"{self.config.pod_pattern}"}} |~ "jobTimeCost" |~ "{job_id}"',
+                    query=f'{{namespace="{self.config.namespace}", pod=~"{self.config.pod_pattern}"}} |~ "jobTimeCost" |~ "{job_id}"',
                     start_time=start_time,
                     end_time=end_time,
                     limit=self.config.max_log_entries,
@@ -92,7 +92,7 @@ class LokiDataCollector:
             # If no job-specific timing logs found, get general jobTimeCost logs
             if not timing_logs_found:
                 general_timing_logs = self._query_logs_direct(
-                    query=f'{{namespace="chaos-testing", pod=~"{self.config.pod_pattern}"}} |~ "jobTimeCost"',
+                    query=f'{{namespace="{self.config.namespace}", pod=~"{self.config.pod_pattern}"}} |~ "jobTimeCost"',
                     start_time=start_time,
                     end_time=end_time,
                     limit=self.config.max_log_entries,
@@ -264,7 +264,7 @@ class LokiDataCollector:
     ) -> List[Dict[str, Any]]:
         """Query Loki logs using LogQL."""
         # Build LogQL query with namespace filter
-        logql = f'{{namespace="chaos-testing", pod=~"{pod_pattern}"}}'
+        logql = f'{{namespace="{self.config.namespace}", pod=~"{pod_pattern}"}}'
         
         # Add search patterns
         for pattern in search_patterns:

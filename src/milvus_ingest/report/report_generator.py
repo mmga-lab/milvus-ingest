@@ -104,7 +104,12 @@ class ReportGenerator:
             try:
                 self.logger.info(f"Collecting Prometheus metrics for {release_name} in namespace {milvus_namespace}")
                 
-                # Collect DataNode metrics
+                # Auto-detect deployment mode if configured to do so
+                if self.config.deployment_mode == "auto":
+                    detected_mode = self.prometheus_collector.detect_deployment_mode(release_name, milvus_namespace)
+                    self.logger.info(f"Auto-detected deployment mode: {detected_mode}")
+                
+                # Collect DataNode metrics (works for both cluster and standalone)
                 datanode_metrics = self.prometheus_collector.collect_datanode_metrics(
                     release_name=release_name,
                     namespace=milvus_namespace,
@@ -473,7 +478,7 @@ class ReportGenerator:
                 'Stats Time (s)',
                 'Build Index Time (s)',
                 'L0 Import Time (s)',
-                'DataNode Pods Details', # DataNode每个pod详情
+                'Milvus Compute Pods Details', # Milvus计算节点(DataNode/Standalone)每个pod详情
                 'MinIO Pods Details',    # MinIO每个pod详情
                 'File Count',
                 'Total File Size (GB)',
@@ -515,7 +520,7 @@ class ReportGenerator:
                     'Stats Time (s)': f"{summary.get('phases', {}).get('stats_done', 0):.2f}",
                     'Build Index Time (s)': f"{summary.get('phases', {}).get('build_index_done', 0):.2f}",
                     'L0 Import Time (s)': f"{summary.get('phases', {}).get('l0_import_done', 0):.6f}",
-                    'DataNode Pods Details': datanode_details,
+                    'Milvus Compute Pods Details': datanode_details,
                     'MinIO Pods Details': minio_details,
                     'File Count': import_info['file_info']['file_count'],
                     'Total File Size (GB)': f"{import_info['file_info']['total_size'] / (1024**3):.2f}",
@@ -528,7 +533,7 @@ class ReportGenerator:
         self.logger.info(f"CSV report written to {output_path}")
     
     def _format_datanode_details(self, datanode_metrics: Dict[str, Any]) -> str:
-        """Format DataNode pod details for CSV display."""
+        """Format Milvus compute nodes (DataNode/Standalone) pod details for CSV display."""
         if not datanode_metrics or not datanode_metrics.get('datanode_pods'):
             return ""
         

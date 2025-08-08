@@ -11,7 +11,10 @@ from .models import ReportConfig
 
 
 class PrometheusCollector:
-    """Prometheus collector with time range support and min/max/avg calculations."""
+    """Prometheus collector with time range support and min/max/avg calculations.
+    
+    Supports both cluster and standalone deployment modes for Milvus.
+    """
     
     def __init__(self, config: ReportConfig):
         """Initialize the Prometheus collector.
@@ -22,6 +25,41 @@ class PrometheusCollector:
         self.config = config
         self.prometheus_url = config.prometheus_url.rstrip('/')
         self.logger = get_logger(__name__)
+    
+    def detect_deployment_mode(self, release_name: str, namespace: str) -> str:
+        """Auto-detect deployment mode by checking which pods exist.
+        
+        Args:
+            release_name: Helm release name
+            namespace: Kubernetes namespace
+            
+        Returns:
+            "standalone" or "cluster" based on detected pods
+        """
+        try:
+            # Check for standalone pod
+            standalone_query = f'up{{namespace="{namespace}", pod=~"{release_name}-milvus-standalone-.*"}}'
+            standalone_result = self.query_prometheus(standalone_query)
+            
+            if standalone_result['data']['result']:
+                self.logger.info(f"Detected standalone deployment mode for {release_name}")
+                return "standalone"
+            
+            # Check for cluster mode pods (datanode)
+            cluster_query = f'up{{namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*"}}'
+            cluster_result = self.query_prometheus(cluster_query)
+            
+            if cluster_result['data']['result']:
+                self.logger.info(f"Detected cluster deployment mode for {release_name}")
+                return "cluster"
+            
+            # Default to cluster mode if detection fails
+            self.logger.warning(f"Could not detect deployment mode for {release_name}, defaulting to cluster")
+            return "cluster"
+            
+        except Exception as e:
+            self.logger.warning(f"Error detecting deployment mode: {e}, defaulting to cluster")
+            return "cluster"
     
     def query_prometheus(self, query: str) -> dict:
         """Execute a Prometheus instant query."""
@@ -71,25 +109,43 @@ class PrometheusCollector:
         start_time: Optional[datetime] = None, 
         end_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        """Get DataNode memory and CPU metrics for each pod separately."""
+        """Get Milvus compute nodes (DataNode/Standalone) memory and CPU metrics for each pod separately.
+        
+        Automatically detects deployment mode and queries appropriate pods:
+        - Cluster mode: milvus-datanode pods
+        - Standalone mode: milvus-standalone pods
+        """
         metrics = {
             "datanode_pods": [],
             "summary": {}
         }
         
+        # Auto-detect or use configured deployment mode
+        deployment_mode = self.config.deployment_mode
+        if deployment_mode == "auto":
+            deployment_mode = self.detect_deployment_mode(release_name, namespace)
+        
+        # Determine pod pattern based on deployment mode
+        if deployment_mode == "standalone":
+            pod_pattern = f"{release_name}-milvus-standalone-.*"
+            self.logger.info(f"Using standalone mode - querying pods: {pod_pattern}")
+        else:
+            pod_pattern = f"{release_name}-milvus-datanode-.*"
+            self.logger.info(f"Using cluster mode - querying pods: {pod_pattern}")
+        
         # DataNode Memory (in GB) - per pod
-        memory_query = f'container_memory_working_set_bytes{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}'
+        memory_query = f'container_memory_working_set_bytes{{cluster="", namespace="{namespace}", pod=~"{pod_pattern}", container!="", image!=""}}'
         
         try:
             # Use time range queries if available, otherwise single point
             if start_time and end_time:
                 memory_result = self.query_prometheus_range(memory_query, start_time, end_time)
-                cpu_query = f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}[5m])'
+                cpu_query = f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{namespace}", pod=~"{pod_pattern}", container!="", image!=""}}[5m])'
                 cpu_result = self.query_prometheus_range(cpu_query, start_time, end_time)
                 use_time_range = True
             else:
                 memory_result = self.query_prometheus(memory_query)
-                cpu_query = f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}[5m])'
+                cpu_query = f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{namespace}", pod=~"{pod_pattern}", container!="", image!=""}}[5m])'
                 cpu_result = self.query_prometheus(cpu_query)
                 use_time_range = False
             

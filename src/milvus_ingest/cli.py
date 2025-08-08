@@ -1324,6 +1324,7 @@ def generate_report(
         start_time=start_dt,
         end_time=end_dt,
         timeout_seconds=timeout,
+        namespace=milvus_namespace or "chaos-testing",  # Default to chaos-testing if not provided
     )
     
     # Generate report
