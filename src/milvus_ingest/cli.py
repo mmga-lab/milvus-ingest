@@ -376,7 +376,9 @@ def generate(
 
         # Calculate effective total rows for display
         # Check if both file_count and file_size are specified (rows will be calculated)
-        effective_display_rows: int | str = 0 if file_count and file_size else total_rows
+        effective_display_rows: int | str = (
+            0 if file_count and file_size else total_rows
+        )
 
         # If both file_count and file_size are specified, estimate total rows for display
         if file_count and file_size and effective_display_rows == 0:
@@ -1274,22 +1276,33 @@ def report() -> None:
     pass
 
 
-
 @report.command("generate")
-@click.option("--job-ids", multiple=True, help="Job IDs to analyze (can specify multiple)")
+@click.option(
+    "--job-ids", multiple=True, help="Job IDs to analyze (can specify multiple)"
+)
 @click.option("--collection-name", help="Collection name")
 @click.option("--start-time", help="Start time (ISO format: 2024-01-01T10:00:00)")
 @click.option("--end-time", help="End time (ISO format: 2024-01-01T11:00:00)")
-@click.option("--output", "-o", default="/tmp/import_summary.csv", help="Output CSV file")
+@click.option(
+    "--output", "-o", default="/tmp/import_summary.csv", help="Output CSV file"
+)
 @click.option("--loki-url", default="http://10.100.36.154:80", help="Loki server URL")
-@click.option("--prometheus-url", default="http://10.100.36.157:9090", help="Prometheus server URL")
+@click.option(
+    "--prometheus-url",
+    default="http://10.100.36.157:9090",
+    help="Prometheus server URL",
+)
 @click.option("--pod-pattern", default="import-stable-test-.*", help="Pod name pattern")
 @click.option("--timeout", type=int, default=30, help="Query timeout in seconds")
-@click.option("--test-scenario", help="Test scenario name (e.g., 'Large Parquet Import')")
+@click.option(
+    "--test-scenario", help="Test scenario name (e.g., 'Large Parquet Import')"
+)
 @click.option("--notes", help="Additional notes for the test")
 @click.option("--release-name", help="Milvus release name (for Prometheus queries)")
 @click.option("--milvus-namespace", help="Milvus namespace (for Prometheus queries)")
-@click.option("--import-info-file", help="Path to import_info.json file for additional metadata")
+@click.option(
+    "--import-info-file", help="Path to import_info.json file for additional metadata"
+)
 def generate_report(
     job_ids: tuple,
     collection_name: Optional[str],
@@ -1308,14 +1321,18 @@ def generate_report(
 ) -> None:
     """Generate CSV report for import analysis with Prometheus metrics."""
     from datetime import datetime, timedelta
-    
+
     # Parse time parameters
     end_dt = datetime.fromisoformat(end_time) if end_time else datetime.now()
-    start_dt = datetime.fromisoformat(start_time) if start_time else end_dt - timedelta(hours=1)
-    
+    start_dt = (
+        datetime.fromisoformat(start_time)
+        if start_time
+        else end_dt - timedelta(hours=1)
+    )
+
     # Convert job_ids tuple to list
     job_id_list = list(job_ids) if job_ids else None
-    
+
     # Create config
     config = ReportConfig(
         loki_url=loki_url,
@@ -1324,14 +1341,15 @@ def generate_report(
         start_time=start_dt,
         end_time=end_dt,
         timeout_seconds=timeout,
-        namespace=milvus_namespace or "chaos-testing",  # Default to chaos-testing if not provided
+        namespace=milvus_namespace
+        or "chaos-testing",  # Default to chaos-testing if not provided
     )
-    
+
     # Generate report
     click.echo(f"📊 Generating import performance report...")
     if job_id_list:
         click.echo(f"   Job IDs: {', '.join(job_id_list)}")
-    
+
     report_gen = ReportGenerator(config)
     result = report_gen.generate_report(
         job_ids=job_id_list,
@@ -1345,19 +1363,19 @@ def generate_report(
         milvus_namespace=milvus_namespace,
         import_info_file=import_info_file,
     )
-    
+
     # Display summary
     click.echo(f"✅ Report saved to: {output}")
     click.echo(f"   Jobs analyzed: {result['jobs_analyzed']}")
     click.echo(f"   Total import time: {result['total_import_time']:.2f} seconds")
-    
+
     # Show job summaries
-    for job_id, summary in result['job_summaries'].items():
+    for job_id, summary in result["job_summaries"].items():
         click.echo(f"\n   Job {job_id}:")
         click.echo(f"     Collection: {summary.get('collection_name', 'N/A')}")
         click.echo(f"     Total time: {summary.get('total_time', 0):.2f}s")
-        if summary.get('phases'):
-            for phase, time in summary['phases'].items():
+        if summary.get("phases"):
+            for phase, time in summary["phases"].items():
                 click.echo(f"     {phase}: {time:.2f}s")
 
 
@@ -1646,6 +1664,30 @@ def import_to_milvus(
             },
             "generation_metadata": metadata.get("generation", {}),
         }
+
+        # Add data generation info directly from meta.json for report generation
+        generation_info = metadata.get("generation_info", {})
+        if generation_info:
+            # Add total_rows if available
+            if "total_rows" in generation_info:
+                import_info["total_rows"] = generation_info["total_rows"]
+
+            # Add file information if available
+            if "data_files" in generation_info:
+                data_files_info = generation_info["data_files"]
+                total_size = sum(f.get("file_size_bytes", 0) for f in data_files_info)
+
+                import_info["file_info"] = {
+                    "file_count": len(data_files_info),
+                    "total_size_bytes": total_size,
+                    "file_sizes": [
+                        f.get("file_size_bytes", 0) for f in data_files_info
+                    ],
+                }
+
+            # Add schema type if available
+            if "schema_type" in generation_info:
+                import_info["schema_type"] = generation_info["schema_type"]
 
         # Output import info to file if requested
         if output_import_info:
