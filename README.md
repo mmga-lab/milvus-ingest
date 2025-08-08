@@ -1,30 +1,30 @@
 # Milvus Ingest - High-Performance Data Ingestion Tool
 
-🚀 **Ultra-fast data ingestion tool for Milvus vector databases** - Built for large-scale data generation and ingestion with vectorized operations, parallel processing, and optimized file I/O. Generate and ingest millions of rows in seconds with automatic file partitioning and intelligent memory management.
+Ultra-fast data ingestion tool for Milvus vector databases. Built for large-scale data generation and ingestion with vectorized operations, parallel processing, and optimized file I/O.
 
-## ⚡ Performance Highlights
+## Performance Highlights
 
-- **🏎️ 10,000-100,000+ rows/sec** - Vectorized NumPy operations for maximum speed
-- **📈 Large-scale optimized** - Designed for datasets >100K rows with intelligent batching  
-- **🔥 Smart file partitioning** - Automatic splitting (256MB chunks, 1M rows/file)
-- **💾 Memory efficient** - Streaming generation prevents memory exhaustion
-- **⚡ Direct PyArrow I/O** - Optimized Parquet writing with Snappy compression
-- **🔄 Parallel processing** - Multi-core CPU utilization with configurable workers
+- **10,000-100,000+ rows/sec** - Vectorized NumPy operations for maximum speed
+- **Large-scale optimized** - Designed for datasets >100K rows with intelligent batching  
+- **Smart file partitioning** - Automatic splitting (256MB chunks, 1M rows/file)
+- **Memory efficient** - Streaming generation prevents memory exhaustion
+- **Direct PyArrow I/O** - Optimized Parquet writing with Snappy compression
+- **Parallel processing** - Multi-core CPU utilization with configurable workers
 
-## ✨ Key Features
+## Key Features
 
-- 🎯 **Ready-to-use schemas** - Pre-built schemas for e-commerce, documents, images, users, news, and videos
-- 📚 **Schema management** - Add, organize, and reuse custom schemas with metadata
-- 🚀 **High-performance generation** - Vectorized operations optimized for large datasets
-- 🔧 **Complete Milvus support** - All field types including vectors, arrays, JSON, and primitive types
-- ✅ **Smart validation** - Pydantic-based validation with detailed error messages and suggestions
-- 📊 **High-performance formats** - Parquet (fastest I/O), JSON (structured data)
-- 🌱 **Reproducible results** - Seed support for consistent data generation
-- 🎨 **Rich customization** - Field constraints, nullable fields, auto-generated IDs
-- 🔍 **Schema exploration** - Validation, help commands, and schema details
-- 🏠 **Unified interface** - Use custom and built-in schemas interchangeably
-- ✅ **Comprehensive verification** - 3-level validation system with query/search correctness testing
-- 🧪 **Functional testing** - Automated query and vector search validation (1000 samples)
+- **Ready-to-use schemas** - Pre-built schemas for e-commerce, documents, images, users, news, and videos
+- **Schema management** - Add, organize, and reuse custom schemas with metadata
+- **High-performance generation** - Vectorized operations optimized for large datasets
+- **Complete Milvus support** - All field types including vectors, arrays, JSON, and primitive types
+- **Smart validation** - Pydantic-based validation with detailed error messages
+- **High-performance formats** - Parquet (fastest I/O), JSON (structured data)
+- **Reproducible results** - Seed support for consistent data generation
+- **Rich customization** - Field constraints, nullable fields, auto-generated IDs
+- **Schema exploration** - Validation, help commands, and schema details
+- **Unified interface** - Use custom and built-in schemas interchangeably
+- **Comprehensive verification** - 3-level validation system with query/search correctness testing
+- **Functional testing** - Automated query and vector search validation (1000 samples)
 
 ## Installation
 
@@ -41,7 +41,7 @@ pdm install --prod
 milvus-ingest --help
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Use Built-in Schemas (Recommended)
 
@@ -171,7 +171,7 @@ manager.add_schema("my_custom", custom_schema, "Custom schema", ["testing"])
 print("Added custom schema!")
 ```
 
-## 📋 Schema Reference
+## Schema Reference
 
 ### Supported Field Types
 
@@ -260,7 +260,7 @@ fields:
     type: "Bool"
 ```
 
-## 📚 CLI Reference
+## CLI Reference
 
 ### Command Structure
 
@@ -339,7 +339,7 @@ milvus-ingest schema add my_ecommerce ecommerce_base.json
 milvus-ingest clean --yes
 ```
 
-## 🔗 Milvus Integration
+## Milvus Integration
 
 ### Direct Insert to Milvus
 
@@ -366,11 +366,11 @@ milvus-ingest to-milvus insert ./products/ \
 ```
 
 **Direct Insert Features:**
-- ✅ Automatic collection creation from metadata
-- ✅ Smart index creation based on vector dimensions
-- ✅ Progress tracking with batch processing
-- ✅ Support for authentication and custom databases
-- ✅ Connection testing before import
+- Automatic collection creation from metadata
+- Smart index creation based on vector dimensions
+- Progress tracking with batch processing
+- Support for authentication and custom databases
+- Connection testing before import
 
 ### Verify Data in Milvus
 
@@ -394,29 +394,29 @@ milvus-ingest to-milvus verify ./products/ --level full \
     --collection-name product_catalog
 ```
 
-**🔍 Comprehensive Verification Features:**
+**Comprehensive Verification Features:**
 
-**📊 Progressive Verification Levels:**
+**Progressive Verification Levels:**
 - **Level 1 (count)**: Row count verification + 1000-sample query/search tests
 - **Level 2 (scalar)**: + Scalar field value validation (excludes vectors)  
 - **Level 3 (full)**: + Vector field validation (complete data quality assurance)
 
-**🧪 Query Correctness Testing:**
-- ✅ **1000-sample exact queries** - Verifies data retrieval functionality (95% success threshold)
-- ✅ **1000-sample vector searches** - Validates similarity search accuracy (80% success threshold)
-- ✅ **Functional validation** - Ensures imported data works correctly, not just exists
+**Query Correctness Testing:**
+- **1000-sample exact queries** - Verifies data retrieval functionality (95% success threshold)
+- **1000-sample vector searches** - Validates similarity search accuracy (80% success threshold)
+- **Functional validation** - Ensures imported data works correctly, not just exists
 
-**🎯 Smart Field Handling:**
-- ✅ **AUTO_ID detection** - Automatically skips auto-generated primary key fields
-- ✅ **Vector precision** - Uses numpy.allclose() with 1e-6 tolerance for float comparisons
-- ✅ **Data type support** - Specialized validation for vectors, floats, strings, JSON, arrays
-- ✅ **Error tolerance** - Allows up to 5% mismatch rate for floating-point precision differences
+**Smart Field Handling:**
+- **AUTO_ID detection** - Automatically skips auto-generated primary key fields
+- **Vector precision** - Uses numpy.allclose() with 1e-6 tolerance for float comparisons
+- **Data type support** - Specialized validation for vectors, floats, strings, JSON, arrays
+- **Error tolerance** - Allows up to 5% mismatch rate for floating-point precision differences
 
-**📋 Rich Output & Reporting:**
-- ✅ Detailed field-by-field verification tables with pass/fail status
-- ✅ Comprehensive summary reports with verification statistics  
-- ✅ Clear debugging information for failed validations
-- ✅ Performance metrics and success rates for query tests
+**Rich Output & Reporting:**
+- Detailed field-by-field verification tables with pass/fail status
+- Comprehensive summary reports with verification statistics  
+- Clear debugging information for failed validations
+- Performance metrics and success rates for query tests
 
 ### Bulk Import from S3/MinIO
 
@@ -447,11 +447,11 @@ milvus-ingest to-milvus import product_catalog ./products/ \
 ```
 
 **Bulk Import Features:**
-- ⚡ High-performance import for millions of rows
-- 📁 Support for single/multiple files or directories
-- ⏳ Asynchronous operation with job tracking
-- 🔄 Wait for completion with timeout support
-- 📊 Import job status monitoring
+- High-performance import for millions of rows
+- Support for single/multiple files or directories
+- Asynchronous operation with job tracking
+- Wait for completion with timeout support
+- Import job status monitoring
 
 ### S3/MinIO Upload
 
@@ -529,7 +529,7 @@ milvus-ingest to-milvus verify ./products/ --level full
 - Use `--level scalar` for business-critical data accuracy
 - Use `--level full` for complete data quality assurance
 
-## 🛠️ Development
+## Development
 
 This project uses PDM for dependency management and follows modern Python development practices.
 
@@ -590,7 +590,7 @@ src/milvus_fake_data/
     └── cardinality_demo.json
 ```
 
-## 📊 Performance Benchmarks
+## Performance Benchmarks
 
 The high-performance engine delivers exceptional speed for large-scale data generation:
 
@@ -613,7 +613,7 @@ The high-performance engine delivers exceptional speed for large-scale data gene
 - Batch size 50K-100K rows for optimal memory/speed balance
 - Enable automatic file partitioning for datasets >1M rows
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please follow these steps:
 

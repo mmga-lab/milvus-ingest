@@ -154,6 +154,21 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 'boto3'       // boto3 library (legacy fallback)
             ]
         )
+        booleanParam(
+            description: 'Generate performance report from Loki and Prometheus data',
+            name: 'generate_report',
+            defaultValue: true
+        )
+        string(
+            description: 'Loki URL for log collection (for performance reports)',
+            name: 'loki_url',
+            defaultValue: 'http://10.100.36.154:80'
+        )
+        string(
+            description: 'Prometheus URL for metrics collection (for performance reports)',
+            name: 'prometheus_url',
+            defaultValue: 'http://10.100.36.157:9090'
+        )
     }
     
     environment {
@@ -161,6 +176,8 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
         RELEASE_NAME = "import-stable-test-${env.BUILD_ID}"
         NAMESPACE = "chaos-testing"
         DATA_PATH = "/root/milvus_ingest_data/${env.BUILD_ID}"
+        IMPORT_INFO = "/tmp/import_info_${env.BUILD_ID}.json"
+        REPORT_DIR = "/tmp/reports_${env.BUILD_ID}"
     }
 
     stages {
@@ -406,7 +423,20 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         echo "Upload Method: ${params.upload_method}"
                         echo "Upload Flags: ${uploadFlags}"
                         
+                        # Prepare directories for import info and reports
+                        mkdir -p ${env.REPORT_DIR}
+                        mkdir -p ${env.ARTIFACTS}
+                        
+                        # Extract collection name from meta.json for later use
+                        COLLECTION_NAME=\$(cat ${outputPath}/meta.json | jq -r '.schema.collection_name // .collection_name // "${params.schema_type}"')
+                        echo "Collection name: \${COLLECTION_NAME}"
+                        
+                        # Record import start time in RFC3339 format for report generation
+                        IMPORT_START_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                        echo "Import start time: \${IMPORT_START_TIME}"
+                        
                         # Import data to Milvus via MinIO from current workspace
+                        # Capture output to extract job IDs
                         pdm run milvus-ingest to-milvus import \\
                             --local-path ${outputPath} \\
                             --s3-path test-data/${env.BUILD_ID} \\
@@ -418,7 +448,54 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --drop-if-exists \\
                             --wait \\
                             --timeout 4800 \\
-                            ${uploadFlags}
+                            ${uploadFlags} | tee /tmp/import_output.log
+                        
+                        # Record import completion time
+                        IMPORT_END_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                        echo "Import end time: \${IMPORT_END_TIME}"
+                        
+                        # Extract job ID(s) from import output
+                        # Look for patterns like "Import job started: abc123def456" or "Job IDs: abc123,def456"
+                        JOB_IDS=\$(grep -E "(Import job started|Job IDs|job ID|job started)" /tmp/import_output.log | \\
+                            sed -E 's/.*([0-9a-f]{8,})/\\1/g' | \\
+                            tr '\\n' ',' | sed 's/,\$//')
+                        
+                        if [ -z "\${JOB_IDS}" ]; then
+                            # If we can't extract job IDs, use a fallback based on timestamp and build ID
+                            JOB_IDS="import-${env.BUILD_ID}-\$(date +%s)"
+                            echo "Warning: Could not extract job IDs from import output, using fallback: \${JOB_IDS}"
+                        else
+                            echo "Extracted job IDs: \${JOB_IDS}"
+                        fi
+                        
+                        # Save import information to JSON file for report generation
+                        cat > ${env.IMPORT_INFO} << EOF
+{
+    "build_id": "${env.BUILD_ID}",
+    "job_ids": "\${JOB_IDS}",
+    "collection_name": "\${COLLECTION_NAME}",
+    "schema_type": "${params.schema_type}",
+    "file_count": "${params.file_count}",
+    "file_size": "${params.file_size}",
+    "file_format": "${params.file_format}",
+    "storage_version": "${params.storage_version}",
+    "partition_count": "${params.partition_count}",
+    "shard_count": "${params.shard_count}",
+    "upload_method": "${params.upload_method}",
+    "import_start_time": "\${IMPORT_START_TIME}",
+    "import_end_time": "\${IMPORT_END_TIME}",
+    "milvus_uri": "${milvusUri}",
+    "minio_endpoint": "${minioEndpoint}",
+    "minio_bucket": "${minioBucket}",
+    "s3_path": "test-data/${env.BUILD_ID}",
+    "jenkins_job": "${env.JOB_NAME}",
+    "jenkins_build": "${env.BUILD_NUMBER}",
+    "jenkins_url": "${env.BUILD_URL}"
+}
+EOF
+                        
+                        echo "Import information saved to ${env.IMPORT_INFO}"
+                        cat ${env.IMPORT_INFO}
                         
                         echo "Import completed successfully using ${params.upload_method} method"
                         """
@@ -461,6 +538,141 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 }
             }
         }
+        
+        stage('Generate Performance Report') {
+            when {
+                expression { params.generate_report == true }
+            }
+            options {
+                timeout(time: 30, unit: 'MINUTES')
+            }
+            steps {
+                container('main') {
+                    script {
+                        sh """
+                        echo "Starting performance report generation"
+                        echo "Reading import information from ${env.IMPORT_INFO}"
+                        
+                        if [ ! -f "${env.IMPORT_INFO}" ]; then
+                            echo "Warning: Import info file not found. Cannot generate detailed report."
+                            exit 0
+                        fi
+                        
+                        # Load import information
+                        COLLECTION_NAME=\$(cat ${env.IMPORT_INFO} | jq -r '.collection_name // "${params.schema_type}"')
+                        JOB_IDS=\$(cat ${env.IMPORT_INFO} | jq -r '.job_ids // "unknown"')
+                        IMPORT_START_TIME=\$(cat ${env.IMPORT_INFO} | jq -r '.import_start_time')
+                        IMPORT_END_TIME=\$(cat ${env.IMPORT_INFO} | jq -r '.import_end_time')
+                        
+                        echo "Collection name: \${COLLECTION_NAME}"
+                        echo "Job IDs: \${JOB_IDS}"
+                        echo "Import time range: \${IMPORT_START_TIME} to \${IMPORT_END_TIME}"
+                        
+                        # Extend time range for report analysis (add 15 minutes before and after)
+                        REPORT_START_TIME=\$(date -u -d "\${IMPORT_START_TIME} - 15 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo \${IMPORT_START_TIME})
+                        REPORT_END_TIME=\$(date -u -d "\${IMPORT_END_TIME} + 15 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo \${IMPORT_END_TIME})
+                        
+                        echo "Extended report time range: \${REPORT_START_TIME} to \${REPORT_END_TIME}"
+                        
+                        # Generate HTML report
+                        HTML_REPORT="${env.REPORT_DIR}/import-performance-report-${env.BUILD_ID}.html"
+                        JSON_REPORT="${env.REPORT_DIR}/import-performance-data-${env.BUILD_ID}.json"
+                        CSV_REPORT="${env.REPORT_DIR}/import-performance-summary-${env.BUILD_ID}.csv"
+                        
+                        echo "Generating HTML performance report..."
+                        pdm run milvus-ingest report generate \\
+                            --job-id "\${JOB_IDS}" \\
+                            --collection-name "\${COLLECTION_NAME}" \\
+                            --start-time "\${REPORT_START_TIME}" \\
+                            --end-time "\${REPORT_END_TIME}" \\
+                            --format html \\
+                            --output "\${HTML_REPORT}" \\
+                            --loki-url "${params.loki_url}" \\
+                            --prometheus-url "${params.prometheus_url}" \\
+                            --timeout 60 \\
+                            --max-logs 50000 || echo "HTML report generation failed, but continuing..."
+                        
+                        echo "Generating JSON performance data..."
+                        pdm run milvus-ingest report generate \\
+                            --job-id "\${JOB_IDS}" \\
+                            --collection-name "\${COLLECTION_NAME}" \\
+                            --start-time "\${REPORT_START_TIME}" \\
+                            --end-time "\${REPORT_END_TIME}" \\
+                            --format json \\
+                            --output "\${JSON_REPORT}" \\
+                            --loki-url "${params.loki_url}" \\
+                            --prometheus-url "${params.prometheus_url}" \\
+                            --timeout 60 \\
+                            --max-logs 50000 || echo "JSON report generation failed, but continuing..."
+                        
+                        echo "Generating CSV performance summary..."
+                        pdm run milvus-ingest report generate \\
+                            --job-id "\${JOB_IDS}" \\
+                            --collection-name "\${COLLECTION_NAME}" \\
+                            --start-time "\${REPORT_START_TIME}" \\
+                            --end-time "\${REPORT_END_TIME}" \\
+                            --format csv \\
+                            --output "\${CSV_REPORT}" \\
+                            --loki-url "${params.loki_url}" \\
+                            --prometheus-url "${params.prometheus_url}" \\
+                            --timeout 60 \\
+                            --max-logs 50000 || echo "CSV report generation failed, but continuing..."
+                        
+                        # Copy reports to Jenkins artifacts directory
+                        mkdir -p ${env.ARTIFACTS}/reports
+                        cp -f ${env.IMPORT_INFO} ${env.ARTIFACTS}/import_info.json || true
+                        cp -f "\${HTML_REPORT}" ${env.ARTIFACTS}/reports/ || true
+                        cp -f "\${JSON_REPORT}" ${env.ARTIFACTS}/reports/ || true
+                        cp -f "\${CSV_REPORT}" ${env.ARTIFACTS}/reports/ || true
+                        
+                        # Generate a summary report for easy consumption
+                        cat > ${env.ARTIFACTS}/reports/report_summary.txt << EOF
+Performance Report Summary
+========================
+
+Build Information:
+- Jenkins Job: ${env.JOB_NAME}
+- Build Number: ${env.BUILD_NUMBER}  
+- Build ID: ${env.BUILD_ID}
+- Build URL: ${env.BUILD_URL}
+
+Test Configuration:
+- Schema Type: ${params.schema_type}
+- Collection Name: \${COLLECTION_NAME}
+- File Count: ${params.file_count}
+- File Size: ${params.file_size}
+- File Format: ${params.file_format}
+- Storage Version: ${params.storage_version}
+- Partitions: ${params.partition_count}
+- Shards: ${params.shard_count}
+- Upload Method: ${params.upload_method}
+
+Import Details:
+- Job IDs: \${JOB_IDS}
+- Import Start: \${IMPORT_START_TIME}
+- Import End: \${IMPORT_END_TIME}
+
+Report Files:
+- HTML Report: import-performance-report-${env.BUILD_ID}.html
+- JSON Data: import-performance-data-${env.BUILD_ID}.json
+- CSV Summary: import-performance-summary-${env.BUILD_ID}.csv
+- Import Info: import_info.json
+
+Data Sources:
+- Loki URL: ${params.loki_url}
+- Prometheus URL: ${params.prometheus_url}
+
+Generated at: \$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+EOF
+                        
+                        echo "Performance reports generated successfully!"
+                        echo "Report files:"
+                        ls -la ${env.ARTIFACTS}/reports/
+                        """
+                    }
+                }
+            }
+        }
     }
 
     post {
@@ -483,6 +695,14 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         sh "tar -zcvf artifacts-${env.RELEASE_NAME}-server-logs.tar.gz k8s_log/ --remove-files || true"
 
                         archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-server-logs.tar.gz", allowEmptyArchive: true
+                    }
+                    
+                    // Always archive performance reports if they exist
+                    if (fileExists("${env.ARTIFACTS}/reports/")) {
+                        echo "Archiving performance reports..."
+                        archiveArtifacts artifacts: "_artifacts/**/*", allowEmptyArchive: true
+                    } else {
+                        echo "No performance reports found to archive"
                     }
 
                     // Cleanup test data

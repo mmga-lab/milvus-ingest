@@ -108,6 +108,27 @@ milvus-ingest to-milvus verify ./output --level scalar   # Business data accurac
 milvus-ingest to-milvus verify ./output --level full     # Complete validation
 ```
 
+### Report Generation
+```bash
+# Generate basic performance report for last hour
+milvus-ingest report generate
+
+# Generate report for specific import job
+milvus-ingest report generate --job-id abc123def456 --format html --output job_analysis.html
+
+# Generate report for specific time range
+milvus-ingest report generate --start-time 2024-01-01T10:00:00 --end-time 2024-01-01T11:00:00
+
+# Generate JSON report for programmatic analysis
+milvus-ingest report generate --collection-name products --format json --output analysis.json
+
+# Generate report for last 6 hours with custom data sources
+milvus-ingest report generate --duration-hours 6 --loki-url http://loki:3100 --prometheus-url http://prometheus:9090
+
+# Generate comprehensive CSV report for specific collection
+milvus-ingest report generate --collection-name ecommerce --format csv --output import_summary.csv --duration-hours 12
+```
+
 ## Architecture Overview
 
 ### Core Components
@@ -120,11 +141,18 @@ milvus-ingest to-milvus verify ./output --level full     # Complete validation
 - **`verifier.py`** - 3-level verification with query/search testing
 - **`uploader.py`** - Multi-method S3 upload (AWS CLI/mc/boto3)
 - **`builtin_schemas.py`** - 15+ production-ready schemas
+- **`report/`** - Performance analysis and report generation module
+  - **`report_generator.py`** - Core report orchestrator with multi-format output
+  - **`loki_collector.py`** - Loki log data collection and parsing
+  - **`prometheus_collector.py`** - Prometheus metrics collection and aggregation
+  - **`models.py`** - Pydantic data models for reports and configurations
+  - **`templates/`** - Jinja2 HTML templates with Chart.js visualizations
 
 ### Data Flow Patterns
-1. **Small datasets (<1M rows)**: Generate → Direct Insert → Verify
-2. **Large datasets (>1M rows)**: Generate → Upload to S3 → Bulk Import → Verify
+1. **Small datasets (<1M rows)**: Generate → Direct Insert → Verify → Report
+2. **Large datasets (>1M rows)**: Generate → Upload to S3 → Bulk Import → Verify → Report
 3. **Schema development**: Validate → Generate sample → Test → Scale up
+4. **Performance analysis**: Import → Monitor (Loki/Prometheus) → Generate Reports → Optimize
 
 ### Performance Architecture
 - **Vectorized operations** using NumPy with BLAS optimization
