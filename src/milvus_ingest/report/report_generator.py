@@ -1,672 +1,458 @@
-"""Core report generator for Milvus import performance analysis."""
+"""Report generator for import analysis with Prometheus metrics."""
 
 from __future__ import annotations
 
-import json
-import uuid
-from datetime import datetime, timedelta
+import csv
+import re
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Any
+from collections import defaultdict
 
 from ..logging_config import get_logger
-from .models import (
-    ReportData, 
-    ReportConfig, 
-    ImportJobSummary,
-)
+from .models import ReportConfig
 from .loki_collector import LokiDataCollector
-from .prometheus_collector import PrometheusDataCollector
+from .prometheus_collector import PrometheusCollector
 
 
 class ReportGenerator:
-    """Main report generator that orchestrates data collection and report creation."""
+    """Report generator for import performance analysis with Prometheus metrics."""
     
     def __init__(self, config: ReportConfig):
-        """Initialize the report generator.
-        
-        Args:
-            config: Report configuration
-        """
+        """Initialize the report generator."""
         self.config = config
         self.logger = get_logger(__name__)
-        
-        # Initialize data collectors
         self.loki_collector = LokiDataCollector(config)
-        self.prometheus_collector = PrometheusDataCollector(config)
+        self.prometheus_collector = PrometheusCollector(config)
     
     def generate_report(
         self,
-        job_id: Optional[str] = None,
+        job_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-    ) -> ReportData:
-        """Generate a comprehensive import performance report.
+        output_file: str = "/tmp/import_summary.csv",
+        test_scenario: Optional[str] = None,
+        notes: Optional[str] = None,
+        release_name: Optional[str] = None,
+        milvus_namespace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Generate import performance report.
         
         Args:
-            job_id: Specific job ID to analyze
-            collection_name: Collection name to filter by
+            job_ids: List of job IDs for a single import (can be multiple jobs)
+            collection_name: Collection name
             start_time: Start time for analysis
             end_time: End time for analysis
+            output_file: Output CSV file path
             
         Returns:
-            Complete report data structure
+            Dictionary with import summary
         """
-        # Use config defaults if not provided
-        job_id = job_id or self.config.job_id_pattern
-        collection_name = collection_name or self.config.collection_name
-        start_time = start_time or self.config.start_time
-        end_time = end_time or self.config.end_time
+        self.logger.info(f"Generating import performance report for jobs: {job_ids}")
         
-        # Set default time range if not specified
-        if not end_time:
-            end_time = datetime.now()
-        if not start_time:
-            start_time = end_time - timedelta(hours=self.config.duration_hours)
+        # Collect timing data from Loki
+        all_timing_data = []
+        job_summaries = {}
         
-        self.logger.info(
-            "Generating import performance report",
-            extra={
-                "job_id": job_id,
-                "collection": collection_name,
-                "start_time": start_time,
-                "end_time": end_time,
-            }
-        )
-        
-        # Create report data structure
-        report_data = ReportData(
-            report_id=str(uuid.uuid4())[:8],
-            generated_at=datetime.now(),
-            time_range_start=start_time,
-            time_range_end=end_time,
-        )
-        
-        try:
-            # Collect Loki log data
-            self.logger.info("Collecting Loki log data...")
-            report_data.loki_logs = self.loki_collector.collect_import_timing_data(
-                job_id=job_id,
+        if job_ids:
+            # Collect data for specific job IDs
+            for job_id in job_ids:
+                self.logger.info(f"Collecting data for job ID: {job_id}")
+                timing_data = self.loki_collector.collect_import_timing_data(
+                    job_id=job_id,
+                    collection_name=collection_name,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                all_timing_data.extend(timing_data)
+                
+                # Summarize per job
+                job_summaries[job_id] = self._summarize_job(timing_data)
+        else:
+            # Collect all import data in time range
+            timing_data = self.loki_collector.collect_import_timing_data(
                 collection_name=collection_name,
                 start_time=start_time,
                 end_time=end_time,
             )
+            all_timing_data = timing_data
             
-            # Collect Prometheus metrics
-            self.logger.info("Collecting Prometheus metrics...")
-            report_data.prometheus_metrics = self.prometheus_collector.collect_import_metrics(
-                start_time=start_time,
-                end_time=end_time,
-            )
+            # Group by job ID
+            jobs_data = defaultdict(list)
+            for data in timing_data:
+                if data.job_id:
+                    jobs_data[data.job_id].append(data)
             
-            # Collect system metrics
-            self.logger.info("Collecting system resource metrics...")
-            report_data.system_metrics = self.prometheus_collector.collect_system_metrics(
-                start_time=start_time,
-                end_time=end_time,
-            )
-            
-            # Collect Milvus cluster metrics
-            self.logger.info("Collecting Milvus cluster metrics...")
-            report_data.milvus_metrics = self.prometheus_collector.collect_milvus_cluster_metrics(
-                start_time=start_time,
-                end_time=end_time,
-            )
-            
-            # Analyze collected data
-            self.logger.info("Analyzing collected data...")
-            self._analyze_import_jobs(report_data)
-            self._generate_insights(report_data)
-            
-        except Exception as e:
-            self.logger.error(f"Error during data collection: {e}")
-            raise
+            for job_id, job_data in jobs_data.items():
+                job_summaries[job_id] = self._summarize_job(job_data)
         
-        self.logger.info(
-            f"Report generation completed",
-            extra={
-                "report_id": report_data.report_id,
-                "loki_logs": len(report_data.loki_logs),
-                "prometheus_metrics": len(report_data.prometheus_metrics),
-                "import_jobs": len(report_data.import_jobs),
-            }
-        )
+        # Extract additional information from logs
+        import_info = self._extract_import_info(all_timing_data)
         
-        return report_data
+        # Collect Prometheus metrics if release_name and namespace provided
+        if release_name and milvus_namespace and self.config.prometheus_url:
+            try:
+                self.logger.info(f"Collecting Prometheus metrics for {release_name} in namespace {milvus_namespace}")
+                
+                # Collect DataNode metrics
+                datanode_metrics = self.prometheus_collector.collect_datanode_metrics(
+                    release_name=release_name,
+                    namespace=milvus_namespace,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+                
+                # Collect S3/MinIO metrics
+                s3_metrics = self.prometheus_collector.collect_s3_minio_metrics(
+                    release_name=release_name,
+                    namespace=milvus_namespace,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+                
+                # Collect binlog metrics
+                binlog_metrics = self.prometheus_collector.collect_binlog_metrics(
+                    release_name=release_name
+                )
+                
+                # Add metrics to import_info
+                import_info["prometheus_metrics"] = {
+                    "datanode": datanode_metrics,
+                    "s3_minio": s3_metrics,
+                    "binlog": binlog_metrics,
+                    "time_range_used": start_time and end_time
+                }
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to collect Prometheus metrics: {e}")
+                import_info["prometheus_metrics"] = {}
+        
+        # Add user-provided test scenario and notes
+        if test_scenario:
+            import_info['test_scenario'] = test_scenario
+        if notes:
+            import_info['notes'] = notes
+        
+        # Generate CSV report
+        self._write_csv_report(job_summaries, import_info, output_file)
+        
+        return {
+            "jobs_analyzed": len(job_summaries),
+            "total_import_time": sum(s.get("total_time", 0) for s in job_summaries.values()),
+            "output_file": output_file,
+            "job_summaries": job_summaries,
+            "import_info": import_info
+        }
     
-    def save_report(
-        self, 
-        report_data: ReportData, 
-        output_path: Optional[str] = None,
-        output_format: Optional[str] = None,
-    ) -> str:
-        """Save report to file.
+    def _summarize_job(self, timing_data: List) -> Dict[str, Any]:
+        """Summarize timing data for a single job."""
+        if not timing_data:
+            return {}
         
-        Args:
-            report_data: Report data to save
-            output_path: Output file path (overrides config)
-            output_format: Output format (overrides config)
+        summary = {
+            "job_id": None,
+            "collection_name": None,
+            "start_time": None,
+            "end_time": None,
+            "phases": {},
+            "total_time": 0
+        }
+        
+        # Extract basic info
+        for data in timing_data:
+            if data.job_id:
+                summary["job_id"] = data.job_id
+            if data.collection_name:
+                summary["collection_name"] = data.collection_name
             
-        Returns:
-            Path to saved report file
-        """
-        output_path = output_path or self.config.output_file
-        output_format = output_format or self.config.output_format
+            # Track phase timings
+            if data.import_phase and data.time_cost:
+                phase = data.import_phase
+                # Convert to seconds for consistency
+                time_in_seconds = self._convert_to_seconds(data.time_cost, data.time_unit)
+                summary["phases"][phase] = time_in_seconds
+                
+                # Track start/end times
+                if not summary["start_time"] or data.timestamp < summary["start_time"]:
+                    summary["start_time"] = data.timestamp
+                if not summary["end_time"] or data.timestamp > summary["end_time"]:
+                    summary["end_time"] = data.timestamp
         
-        self.logger.info(f"Saving report to {output_path} in {output_format} format")
+        # Calculate total time from phases
+        if "all_completed" in summary["phases"]:
+            summary["total_time"] = summary["phases"]["all_completed"]
+        elif summary["phases"]:
+            summary["total_time"] = sum(summary["phases"].values())
         
-        if output_format.lower() == 'json':
-            return self._save_json_report(report_data, output_path)
-        elif output_format.lower() == 'csv':
-            return self._save_csv_report(report_data, output_path)
-        elif output_format.lower() == 'html':
-            return self._save_html_report(report_data, output_path)
+        return summary
+    
+    def _convert_to_seconds(self, time_value: float, time_unit: str) -> float:
+        """Convert time value to seconds."""
+        if not time_value:
+            return 0.0
+            
+        if time_unit == "s":
+            return time_value
+        elif time_unit == "ms":
+            return time_value / 1000.0
+        elif time_unit == "µs" or time_unit == "us":
+            return time_value / 1_000_000.0
+        elif time_unit == "ns":
+            return time_value / 1_000_000_000.0
         else:
-            raise ValueError(f"Unsupported output format: {output_format}")
+            # Assume seconds if unknown
+            return time_value
     
-    def _analyze_import_jobs(self, report_data: ReportData) -> None:
-        """Analyze import jobs from collected data."""
-        job_summaries = {}
+    def _extract_import_info(self, timing_data: List) -> Dict[str, Any]:
+        """Extract detailed import information from log messages."""
+        info = {
+            "test_scenario": "",  # 测试场景名称
+            "total_rows": 0,      # 总行数
+            "file_type": "",      # 文件类型 (parquet, json, etc.)
+            "import_result": "success",  # 导入结果
+            "collection_schema": {},
+            "file_info": {
+                "file_count": 0,
+                "file_sizes": [],
+                "total_size": 0,
+                "binlog_count": 0,    # Binlog文件数量
+                "binlog_size": 0,     # Binlog总大小
+            },
+            "resource_settings": {
+                "datanode_cpu": "",   # DataNode CPU设置
+                "datanode_memory": "", # DataNode内存设置
+            },
+            "storage_metrics": {
+                "s3_minio_iops": 0,       # S3/MinIO IOPS
+                "s3_minio_throughput": 0, # S3/MinIO吞吐量 (MB/s)
+            },
+            "notes": ""  # 备注信息
+        }
         
-        # Group timing data by job ID
-        for timing in report_data.loki_logs:
-            if not timing.job_id:
+        # Parse log messages for additional information
+        for data in timing_data:
+            if not data.message:
                 continue
                 
-            job_id = timing.job_id
-            if job_id not in job_summaries:
-                job_summaries[job_id] = ImportJobSummary(
-                    job_id=job_id,
-                    collection_name=timing.collection_name,
-                    status='unknown',
+            message = data.message
+            
+            # Extract total rows
+            rows_match = re.search(r'(?:total[_\s]*)?rows?[:\s=]+(\d+)', message, re.IGNORECASE)
+            if rows_match:
+                info["total_rows"] = int(rows_match.group(1))
+            
+            # Extract file type
+            if "parquet" in message.lower():
+                info["file_type"] = "parquet"
+            elif "json" in message.lower():
+                info["file_type"] = "json"
+            elif "csv" in message.lower():
+                info["file_type"] = "csv"
+            elif "numpy" in message.lower() or ".npy" in message.lower():
+                info["file_type"] = "numpy"
+            
+            # Extract file information
+            file_match = re.search(r'file[_\s]*count[:\s=]+(\d+)', message, re.IGNORECASE)
+            if file_match:
+                info["file_info"]["file_count"] = int(file_match.group(1))
+            
+            size_match = re.search(r'file[_\s]*size[:\s=]+([\d.]+)\s*([KMGT]?B)', message, re.IGNORECASE)
+            if size_match:
+                size = float(size_match.group(1))
+                unit = size_match.group(2)
+                size_bytes = self._convert_to_bytes(size, unit)
+                info["file_info"]["file_sizes"].append(size_bytes)
+                info["file_info"]["total_size"] += size_bytes
+            
+            # Extract binlog information
+            binlog_count_match = re.search(r'binlog[_\s]*count[:\s=]+(\d+)', message, re.IGNORECASE)
+            if binlog_count_match:
+                info["file_info"]["binlog_count"] = int(binlog_count_match.group(1))
+            
+            binlog_size_match = re.search(r'binlog[_\s]*size[:\s=]+([\d.]+)\s*([KMGT]?B)', message, re.IGNORECASE)
+            if binlog_size_match:
+                size = float(binlog_size_match.group(1))
+                unit = binlog_size_match.group(2)
+                info["file_info"]["binlog_size"] = self._convert_to_bytes(size, unit)
+            
+            # Extract DataNode resource settings
+            if "datanode" in message.lower():
+                cpu_match = re.search(r'cpu[:\s=]+([\d.]+)', message, re.IGNORECASE)
+                if cpu_match:
+                    info["resource_settings"]["datanode_cpu"] = cpu_match.group(1)
+                
+                mem_match = re.search(r'memory[:\s=]+([\d.]+)\s*([KMGT]?[iB]+)?', message, re.IGNORECASE)
+                if mem_match:
+                    info["resource_settings"]["datanode_memory"] = f"{mem_match.group(1)}{mem_match.group(2) or ''}"
+            
+            # Extract S3/MinIO metrics
+            iops_match = re.search(r'iops[:\s=]+([\d.]+)', message, re.IGNORECASE)
+            if iops_match:
+                info["storage_metrics"]["s3_minio_iops"] = float(iops_match.group(1))
+            
+            throughput_match = re.search(r'throughput[:\s=]+([\d.]+)\s*([KMGT]?B/s)?', message, re.IGNORECASE)
+            if throughput_match:
+                throughput = float(throughput_match.group(1))
+                unit = throughput_match.group(2) or "MB/s"
+                # Convert to MB/s for consistency
+                if "GB/s" in unit:
+                    throughput *= 1024
+                elif "KB/s" in unit:
+                    throughput /= 1024
+                info["storage_metrics"]["s3_minio_throughput"] = throughput
+            
+            # Check for errors or failures
+            if "error" in message.lower() or "failed" in message.lower():
+                if "import" in message.lower():
+                    info["import_result"] = "failed"
+            
+            # Try to extract collection schema info
+            schema_match = re.search(r'schema[:\s]+({.*?})', message, re.IGNORECASE)
+            if schema_match:
+                try:
+                    import json
+                    info["collection_schema"] = json.loads(schema_match.group(1))
+                except:
+                    pass
+        
+        return info
+    
+    def _convert_to_bytes(self, size: float, unit: str) -> float:
+        """Convert size to bytes."""
+        unit = unit.upper()
+        if unit == "B":
+            return size
+        elif unit == "KB":
+            return size * 1024
+        elif unit == "MB":
+            return size * 1024 * 1024
+        elif unit == "GB":
+            return size * 1024 * 1024 * 1024
+        elif unit == "TB":
+            return size * 1024 * 1024 * 1024 * 1024
+        else:
+            return size
+    
+    def _write_csv_report(self, job_summaries: Dict, import_info: Dict, output_file: str):
+        """Write CSV report with performance metrics."""
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Get Prometheus metrics if available
+        prometheus_metrics = import_info.get('prometheus_metrics', {})
+        datanode_metrics = prometheus_metrics.get('datanode', {})
+        s3_metrics = prometheus_metrics.get('s3_minio', {})
+        binlog_metrics = prometheus_metrics.get('binlog', {})
+        is_time_range = prometheus_metrics.get('time_range_used', False)
+        
+        with open(output_path, 'w', newline='') as csvfile:
+            fieldnames = [
+                'Test Scenario',         # 测试场景
+                'Job ID',
+                'Collection Name',
+                'Total Rows',            # 总行数
+                'File Type',             # 文件类型
+                'Import Result',         # 导入结果
+                'Total Time (s)',        # 总耗时
+                'Pending Time (s)',      # 各阶段耗时
+                'Pre-Import Time (s)',
+                'Import Time (s)',
+                'Stats Time (s)',
+                'Build Index Time (s)',
+                'L0 Import Time (s)',
+                'DataNode Memory',       # DataNode内存
+                'DataNode CPU',          # DataNode CPU
+                'S3/MinIO IOPS',        # S3/MinIO IOPS
+                'S3/MinIO Throughput (MB/s)',  # S3/MinIO吞吐量
+                'File Count',
+                'Total File Size (GB)',
+                'Binlog Count',          # Binlog数量
+                'Binlog Size (GB)',      # Binlog大小
+                'Notes'                  # 备注
+            ]
+            
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for job_id, summary in job_summaries.items():
+                # Format DataNode memory
+                datanode_memory = self._format_prometheus_metric(
+                    datanode_metrics.get('datanode_memory_gb', 0), 
+                    is_time_range, 
+                    unit='GB'
                 )
-            
-            job_summary = job_summaries[job_id]
-            
-            # Update job details
-            if timing.collection_name and not job_summary.collection_name:
-                job_summary.collection_name = timing.collection_name
-            
-            # Track timing phases
-            if timing.import_phase == 'start' and not job_summary.start_time:
-                job_summary.start_time = timing.timestamp
-            elif timing.import_phase in ['completed', 'failed']:
-                job_summary.end_time = timing.timestamp
-                job_summary.status = timing.import_phase
-            
-            # Track phase durations
-            if timing.time_cost and timing.import_state:
-                # Convert to milliseconds
-                time_ms = timing.time_cost
-                if timing.time_unit == 's':
-                    time_ms *= 1000
-                elif timing.time_unit in ['us', 'µs']:
-                    time_ms /= 1000
                 
-                job_summary.phases[timing.import_state] = time_ms
-            
-            # Track errors
-            if timing.import_phase == 'failed':
-                job_summary.errors.append(timing.message[:200])
+                # Format DataNode CPU
+                datanode_cpu = self._format_prometheus_metric(
+                    datanode_metrics.get('datanode_cpu_cores', 0), 
+                    is_time_range, 
+                    unit='cores'
+                )
+                
+                # Format S3/MinIO IOPS
+                s3_iops = self._format_prometheus_metric(
+                    s3_metrics.get('s3_minio_iops', 0), 
+                    is_time_range, 
+                    unit='req/s'
+                )
+                
+                # Format S3/MinIO throughput
+                s3_throughput = self._format_prometheus_metric(
+                    s3_metrics.get('s3_minio_throughput_mbps', 0), 
+                    is_time_range, 
+                    unit='MB/s'
+                )
+                
+                row = {
+                    'Test Scenario': import_info.get('test_scenario', ''),
+                    'Job ID': job_id,
+                    'Collection Name': summary.get('collection_name', ''),
+                    'Total Rows': import_info.get('total_rows', 0),
+                    'File Type': import_info.get('file_type', ''),
+                    'Import Result': import_info.get('import_result', 'success'),
+                    'Total Time (s)': f"{summary.get('total_time', 0):.2f}",
+                    'Pending Time (s)': f"{summary.get('phases', {}).get('start_to_execute', 0):.2f}",
+                    'Pre-Import Time (s)': f"{summary.get('phases', {}).get('preimport_done', 0):.2f}",
+                    'Import Time (s)': f"{summary.get('phases', {}).get('import_done', 0):.2f}",
+                    'Stats Time (s)': f"{summary.get('phases', {}).get('stats_done', 0):.2f}",
+                    'Build Index Time (s)': f"{summary.get('phases', {}).get('build_index_done', 0):.2f}",
+                    'L0 Import Time (s)': f"{summary.get('phases', {}).get('l0_import_done', 0):.6f}",
+                    'DataNode Memory': datanode_memory,
+                    'DataNode CPU': datanode_cpu,
+                    'S3/MinIO IOPS': s3_iops,
+                    'S3/MinIO Throughput (MB/s)': s3_throughput,
+                    'File Count': import_info['file_info']['file_count'],
+                    'Total File Size (GB)': f"{import_info['file_info']['total_size'] / (1024**3):.2f}",
+                    'Binlog Count': binlog_metrics.get('binlog_count', import_info['file_info'].get('binlog_count', 0)),
+                    'Binlog Size (GB)': f"{binlog_metrics.get('binlog_size_gb', import_info['file_info'].get('binlog_size', 0) / (1024**3)):.2f}",
+                    'Notes': import_info.get('notes', '')
+                }
+                writer.writerow(row)
         
-        # Calculate total durations and set final status
-        for job_summary in job_summaries.values():
-            if job_summary.start_time and job_summary.end_time:
-                duration = job_summary.end_time - job_summary.start_time
-                job_summary.total_duration_ms = duration.total_seconds() * 1000
+        self.logger.info(f"CSV report written to {output_path}")
+    
+    def _format_prometheus_metric(self, metric_value, is_time_range: bool, unit: str = '') -> str:
+        """Format Prometheus metric values for CSV output."""
+        if not metric_value:
+            return ""
+        
+        if is_time_range and isinstance(metric_value, dict):
+            # Time range format: "min/avg/max unit"
+            min_val = metric_value.get('min', 0)
+            avg_val = metric_value.get('avg', 0)
+            max_val = metric_value.get('max', 0)
             
-            # Set status based on available information
-            if job_summary.status == 'unknown':
-                if job_summary.errors:
-                    job_summary.status = 'failed'
-                elif job_summary.phases:
-                    job_summary.status = 'completed'
+            if unit:
+                return f"{min_val:.2f}/{avg_val:.2f}/{max_val:.2f} {unit}"
+            else:
+                return f"{min_val:.2f}/{avg_val:.2f}/{max_val:.2f}"
+        else:
+            # Single value format
+            if isinstance(metric_value, (int, float)):
+                if unit:
+                    return f"{metric_value:.2f} {unit}"
                 else:
-                    job_summary.status = 'running'
-        
-        report_data.import_jobs = list(job_summaries.values())
-        
-        # Calculate summary statistics
-        report_data.total_jobs = len(report_data.import_jobs)
-        report_data.successful_jobs = len([j for j in report_data.import_jobs if j.status == 'completed'])
-        report_data.failed_jobs = len([j for j in report_data.import_jobs if j.status == 'failed'])
-        
-        # Calculate average job duration
-        completed_jobs = [j for j in report_data.import_jobs if j.total_duration_ms]
-        if completed_jobs:
-            report_data.average_job_duration_ms = sum(j.total_duration_ms for j in completed_jobs) / len(completed_jobs)
-    
-    def _generate_insights(self, report_data: ReportData) -> None:
-        """Generate performance insights and recommendations."""
-        insights = []
-        recommendations = []
-        
-        # Analyze job success rate
-        if report_data.total_jobs > 0:
-            success_rate = report_data.successful_jobs / report_data.total_jobs
-            if success_rate < 0.8:
-                insights.append(f"Low success rate: {success_rate:.1%} of import jobs completed successfully")
-                recommendations.append("Investigate failed jobs and address underlying issues")
-        
-        # Analyze job durations
-        if report_data.import_jobs:
-            durations = [j.total_duration_ms for j in report_data.import_jobs if j.total_duration_ms]
-            if durations:
-                avg_duration = sum(durations) / len(durations)
-                max_duration = max(durations)
-                
-                if avg_duration > 300000:  # > 5 minutes
-                    insights.append(f"Long average import duration: {avg_duration/1000:.1f}s")
-                    recommendations.append("Consider optimizing data format or increasing resources")
-                
-                if max_duration > 1800000:  # > 30 minutes
-                    insights.append(f"Some jobs took very long: {max_duration/1000:.1f}s maximum")
-                    recommendations.append("Investigate slowest jobs for bottlenecks")
-        
-        # Analyze phase timing patterns
-        phase_times = {}
-        for job in report_data.import_jobs:
-            for phase, duration in job.phases.items():
-                if phase not in phase_times:
-                    phase_times[phase] = []
-                phase_times[phase].append(duration)
-        
-        # Identify bottleneck phases
-        for phase, times in phase_times.items():
-            if len(times) > 2:  # Need multiple samples
-                avg_time = sum(times) / len(times)
-                if avg_time > 60000:  # > 1 minute
-                    insights.append(f"Slow import phase '{phase}': {avg_time/1000:.1f}s average")
-                    if phase == 'buildIndex':
-                        recommendations.append("Consider using AUTOINDEX for faster indexing during bulk imports")
-                    elif phase == 'l0Import':
-                        recommendations.append("Consider optimizing file sizes and batch configurations")
-        
-        # Analyze system resource usage
-        if report_data.system_metrics:
-            cpu_usages = [m.cpu_usage_percent for m in report_data.system_metrics if m.cpu_usage_percent]
-            memory_usages = [m.memory_usage_percent for m in report_data.system_metrics if m.memory_usage_percent]
-            
-            if cpu_usages:
-                avg_cpu = sum(cpu_usages) / len(cpu_usages)
-                
-                if avg_cpu > 80:
-                    insights.append(f"High CPU usage during imports: {avg_cpu:.1f}% average")
-                    recommendations.append("Consider scaling horizontally or optimizing CPU-intensive operations")
-                elif avg_cpu < 20:
-                    insights.append(f"Low CPU utilization: {avg_cpu:.1f}% average")
-                    recommendations.append("CPU resources are underutilized - consider increasing batch sizes")
-            
-            if memory_usages:
-                max_memory = max(memory_usages)
-                
-                if max_memory > 90:
-                    insights.append(f"High memory pressure: {max_memory:.1f}% peak usage")
-                    recommendations.append("Monitor for memory leaks or consider increasing memory allocation")
-        
-        # Analyze data throughput
-        if report_data.milvus_metrics:
-            row_counts = [m.stored_rows_total for m in report_data.milvus_metrics]
-            if len(row_counts) > 1:
-                row_growth = row_counts[-1] - row_counts[0]
-                time_span_hours = (report_data.time_range_end - report_data.time_range_start).total_seconds() / 3600
-                
-                if time_span_hours > 0:
-                    rows_per_hour = row_growth / time_span_hours
-                    if rows_per_hour > 0:
-                        insights.append(f"Data ingestion rate: {rows_per_hour:,.0f} rows/hour")
-                        
-                        if rows_per_hour < 100000:  # < 100K rows/hour
-                            recommendations.append("Low ingestion rate - consider optimizing batch sizes and parallelism")
-        
-        report_data.bottlenecks = insights
-        report_data.recommendations = recommendations
-    
-    def _save_json_report(self, report_data: ReportData, output_path: str) -> str:
-        """Save report as JSON file."""
-        # Convert to dict for JSON serialization
-        report_dict = report_data.model_dump(mode='json')
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(report_dict, f, indent=2, default=str)
-        
-        self.logger.info(f"JSON report saved to {output_path}")
-        return output_path
-    
-    def _save_csv_report(self, report_data: ReportData, output_path: str) -> str:
-        """Save report as CSV file."""
-        import csv
-        
-        # Generate CSV with import job summaries
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            
-            # Header
-            writer.writerow([
-                'Job ID', 'Collection', 'Status', 'Start Time', 'End Time',
-                'Duration (ms)', 'Phases', 'Errors'
-            ])
-            
-            # Data rows
-            for job in report_data.import_jobs:
-                phases_str = ';'.join([f"{k}={v:.1f}ms" for k, v in job.phases.items()])
-                errors_str = ';'.join(job.errors)
-                
-                writer.writerow([
-                    job.job_id,
-                    job.collection_name or '',
-                    job.status,
-                    job.start_time.isoformat() if job.start_time else '',
-                    job.end_time.isoformat() if job.end_time else '',
-                    job.total_duration_ms or '',
-                    phases_str,
-                    errors_str,
-                ])
-        
-        self.logger.info(f"CSV report saved to {output_path}")
-        return output_path
-    
-    def _save_html_report(self, report_data: ReportData, output_path: str) -> str:
-        """Save report as HTML file using template."""
-        try:
-            from jinja2 import Environment, FileSystemLoader
-            
-            # Find template directory
-            template_dir = Path(__file__).parent / "templates"
-            if self.config.template_dir:
-                template_dir = Path(self.config.template_dir)
-                
-            # Setup Jinja2 environment
-            env = Environment(loader=FileSystemLoader(str(template_dir)))
-            template = env.get_template("report_template.html")
-            
-            # Prepare chart data
-            chart_data = self._prepare_chart_data(report_data)
-            
-            # Render template
-            html_content = template.render(
-                report_data=report_data,
-                chart_data=chart_data,
-            )
-            
-        except ImportError:
-            self.logger.warning("Jinja2 not available, using simple HTML generator")
-            html_content = self._generate_simple_html(report_data)
-        except Exception as e:
-            self.logger.warning(f"Template rendering failed: {e}, using simple HTML generator")
-            html_content = self._generate_simple_html(report_data)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        
-        self.logger.info(f"HTML report saved to {output_path}")
-        return output_path
-    
-    def _prepare_chart_data(self, report_data: ReportData) -> dict:
-        """Prepare data for Chart.js visualizations."""
-        chart_data = {}
-        
-        # Jobs Timeline Chart
-        if report_data.import_jobs:
-            jobs_timeline = {
-                'datasets': [{
-                    'label': 'Job Durations',
-                    'data': [],
-                    'backgroundColor': 'rgba(102, 126, 234, 0.6)',
-                    'borderColor': 'rgba(102, 126, 234, 1)',
-                    'pointRadius': 6,
-                }]
-            }
-            
-            for job in report_data.import_jobs:
-                if job.start_time and job.total_duration_ms:
-                    jobs_timeline['datasets'][0]['data'].append({
-                        'x': job.start_time.isoformat(),
-                        'y': job.total_duration_ms / 1000,  # Convert to seconds
-                    })
-            
-            chart_data['jobs_timeline'] = jobs_timeline
-        
-        # System Metrics Chart
-        if report_data.system_metrics:
-            system_metrics = {
-                'labels': [m.timestamp.isoformat() for m in report_data.system_metrics],
-                'datasets': []
-            }
-            
-            # CPU usage
-            cpu_data = [m.cpu_usage_percent or 0 for m in report_data.system_metrics]
-            if any(cpu_data):
-                system_metrics['datasets'].append({
-                    'label': 'CPU Usage (%)',
-                    'data': cpu_data,
-                    'borderColor': 'rgba(255, 99, 132, 1)',
-                    'backgroundColor': 'rgba(255, 99, 132, 0.2)',
-                    'tension': 0.4,
-                })
-            
-            # Memory usage
-            memory_data = [m.memory_usage_percent or 0 for m in report_data.system_metrics]
-            if any(memory_data):
-                system_metrics['datasets'].append({
-                    'label': 'Memory Usage (%)',
-                    'data': memory_data,
-                    'borderColor': 'rgba(54, 162, 235, 1)',
-                    'backgroundColor': 'rgba(54, 162, 235, 0.2)',
-                    'tension': 0.4,
-                })
-            
-            chart_data['system_metrics'] = system_metrics
-        
-        # Phase Duration Chart
-        if report_data.import_jobs:
-            phase_durations = {}
-            for job in report_data.import_jobs:
-                for phase, duration in job.phases.items():
-                    if phase not in phase_durations:
-                        phase_durations[phase] = []
-                    phase_durations[phase].append(duration)
-            
-            if phase_durations:
-                phase_chart = {
-                    'labels': list(phase_durations.keys()),
-                    'datasets': [{
-                        'label': 'Average Duration (ms)',
-                        'data': [
-                            sum(durations) / len(durations) 
-                            for durations in phase_durations.values()
-                        ],
-                        'backgroundColor': [
-                            'rgba(255, 99, 132, 0.6)',
-                            'rgba(54, 162, 235, 0.6)',
-                            'rgba(255, 206, 86, 0.6)',
-                            'rgba(75, 192, 192, 0.6)',
-                            'rgba(153, 102, 255, 0.6)',
-                        ],
-                        'borderColor': [
-                            'rgba(255, 99, 132, 1)',
-                            'rgba(54, 162, 235, 1)',
-                            'rgba(255, 206, 86, 1)',
-                            'rgba(75, 192, 192, 1)',
-                            'rgba(153, 102, 255, 1)',
-                        ],
-                        'borderWidth': 1,
-                    }]
-                }
-                chart_data['phase_durations'] = phase_chart
-        
-        # Data Growth Chart
-        if report_data.milvus_metrics:
-            data_growth = {
-                'labels': [m.timestamp.isoformat() for m in report_data.milvus_metrics],
-                'datasets': []
-            }
-            
-            # Stored rows
-            rows_data = [m.stored_rows_total for m in report_data.milvus_metrics]
-            if any(rows_data):
-                data_growth['datasets'].append({
-                    'label': 'Stored Rows',
-                    'data': rows_data,
-                    'borderColor': 'rgba(75, 192, 192, 1)',
-                    'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                    'tension': 0.4,
-                    'yAxisID': 'y',
-                })
-            
-            # Storage size (in GB)
-            storage_data = [m.stored_binlog_size_bytes / (1024**3) for m in report_data.milvus_metrics]
-            if any(storage_data):
-                data_growth['datasets'].append({
-                    'label': 'Storage Size (GB)',
-                    'data': storage_data,
-                    'borderColor': 'rgba(153, 102, 255, 1)',
-                    'backgroundColor': 'rgba(153, 102, 255, 0.2)',
-                    'tension': 0.4,
-                    'yAxisID': 'y1',
-                })
-            
-            # Add dual y-axes configuration if we have both datasets
-            if len(data_growth['datasets']) > 1:
-                data_growth['options'] = {
-                    'scales': {
-                        'y': {
-                            'type': 'linear',
-                            'display': True,
-                            'position': 'left',
-                        },
-                        'y1': {
-                            'type': 'linear',
-                            'display': True,
-                            'position': 'right',
-                            'grid': {
-                                'drawOnChartArea': False,
-                            },
-                        }
-                    }
-                }
-            
-            chart_data['data_growth'] = data_growth
-        
-        return chart_data
-    
-    def _generate_simple_html(self, report_data: ReportData) -> str:
-        """Generate a simple HTML report (placeholder for template-based version)."""
-        html = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Milvus Import Performance Report - {report_data.report_id}</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .header {{ background: #f5f5f5; padding: 20px; border-radius: 5px; margin-bottom: 20px; }}
-        .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }}
-        .stat-card {{ background: #e8f4f8; padding: 15px; border-radius: 5px; text-align: center; }}
-        .stat-number {{ font-size: 2em; font-weight: bold; color: #2c5aa0; }}
-        .stat-label {{ color: #666; margin-top: 5px; }}
-        .section {{ margin-bottom: 30px; }}
-        .section h2 {{ color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 10px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-        th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
-        th {{ background-color: #f2f2f2; }}
-        .success {{ color: #28a745; }}
-        .failed {{ color: #dc3545; }}
-        .running {{ color: #ffc107; }}
-        .insight {{ background: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; margin: 10px 0; }}
-        .recommendation {{ background: #d4edda; padding: 10px; border-left: 4px solid #28a745; margin: 10px 0; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>Milvus Import Performance Report</h1>
-        <p><strong>Report ID:</strong> {report_data.report_id}</p>
-        <p><strong>Generated:</strong> {report_data.generated_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
-        <p><strong>Time Range:</strong> {report_data.time_range_start.strftime('%Y-%m-%d %H:%M:%S')} - {report_data.time_range_end.strftime('%Y-%m-%d %H:%M:%S')}</p>
-    </div>
-    
-    <div class="summary">
-        <div class="stat-card">
-            <div class="stat-number">{report_data.total_jobs}</div>
-            <div class="stat-label">Total Jobs</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number">{report_data.successful_jobs}</div>
-            <div class="stat-label">Successful Jobs</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number">{report_data.failed_jobs}</div>
-            <div class="stat-label">Failed Jobs</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number">{report_data.average_job_duration_ms/1000:.1f}s</div>
-            <div class="stat-label">Avg Duration</div>
-        </div>
-    </div>
-"""
-        
-        # Add import jobs table
-        if report_data.import_jobs:
-            html += """
-    <div class="section">
-        <h2>Import Jobs</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Job ID</th>
-                    <th>Collection</th>
-                    <th>Status</th>
-                    <th>Duration</th>
-                    <th>Key Phases</th>
-                </tr>
-            </thead>
-            <tbody>
-"""
-            for job in report_data.import_jobs:
-                status_class = job.status
-                duration = f"{job.total_duration_ms/1000:.1f}s" if job.total_duration_ms else "N/A"
-                phases = ", ".join([f"{k}: {v:.0f}ms" for k, v in sorted(job.phases.items())[:3]])
-                
-                html += f"""
-                <tr>
-                    <td>{job.job_id[:12]}...</td>
-                    <td>{job.collection_name or 'N/A'}</td>
-                    <td class="{status_class}">{job.status.title()}</td>
-                    <td>{duration}</td>
-                    <td>{phases}</td>
-                </tr>
-"""
-            html += """
-            </tbody>
-        </table>
-    </div>
-"""
-        
-        # Add insights and recommendations
-        if report_data.bottlenecks or report_data.recommendations:
-            html += """
-    <div class="section">
-        <h2>Analysis & Recommendations</h2>
-"""
-            for insight in report_data.bottlenecks:
-                html += f'<div class="insight">💡 <strong>Insight:</strong> {insight}</div>'
-            
-            for recommendation in report_data.recommendations:
-                html += f'<div class="recommendation">✅ <strong>Recommendation:</strong> {recommendation}</div>'
-            
-            html += "</div>"
-        
-        html += """
-    <div class="section">
-        <h2>Data Sources</h2>
-        <p><strong>Loki Logs:</strong> {len(report_data.loki_logs)} entries</p>
-        <p><strong>Prometheus Metrics:</strong> {len(report_data.prometheus_metrics)} data points</p>
-        <p><strong>System Metrics:</strong> {len(report_data.system_metrics)} data points</p>
-        <p><strong>Milvus Metrics:</strong> {len(report_data.milvus_metrics)} data points</p>
-    </div>
-</body>
-</html>
-""".format(len=len, report_data=report_data)
-        
-        return html
+                    return f"{metric_value:.2f}"
+            else:
+                return str(metric_value)

@@ -591,61 +591,41 @@ EOF
                         echo "Deployed pods matching pattern:"
                         kubectl get pods -n ${env.NAMESPACE} -l app.kubernetes.io/instance=${env.RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
                         
-                        # Generate HTML report
-                        HTML_REPORT="${env.REPORT_DIR}/import-performance-report-${env.BUILD_ID}.html"
-                        JSON_REPORT="${env.REPORT_DIR}/import-performance-data-${env.BUILD_ID}.json"
+                        # Generate CSV performance report
                         CSV_REPORT="${env.REPORT_DIR}/import-performance-summary-${env.BUILD_ID}.csv"
                         
-                        echo "Generating HTML performance report..."
-                        pdm run milvus-ingest report generate \\
-                            --job-id "\${JOB_IDS}" \\
-                            --collection-name "\${COLLECTION_NAME}" \\
-                            --start-time "\${REPORT_START_TIME}" \\
-                            --end-time "\${REPORT_END_TIME}" \\
-                            --format html \\
-                            --output "\${HTML_REPORT}" \\
-                            --loki-url "${params.loki_url}" \\
-                            --prometheus-url "${params.prometheus_url}" \\
-                            --pod-pattern "\${POD_PATTERN}" \\
-                            --namespace "${env.NAMESPACE}" \\
-                            --timeout 60 \\
-                            --max-logs 50000 || echo "HTML report generation failed, but continuing..."
+                        echo "Generating CSV performance report with Prometheus metrics..."
+                        # Parse job IDs - handle both single ID and comma-separated list
+                        if [[ "\${JOB_IDS}" == *","* ]]; then
+                            # Multiple job IDs - split and add --job-ids for each
+                            JOB_PARAMS=""
+                            IFS=',' read -ra JOB_ARRAY <<< "\${JOB_IDS}"
+                            for job_id in "\${JOB_ARRAY[@]}"; do
+                                JOB_PARAMS="\${JOB_PARAMS} --job-ids \${job_id}"
+                            done
+                        else
+                            # Single job ID
+                            JOB_PARAMS="--job-ids \${JOB_IDS}"
+                        fi
                         
-                        echo "Generating JSON performance data..."
                         pdm run milvus-ingest report generate \\
-                            --job-id "\${JOB_IDS}" \\
+                            \${JOB_PARAMS} \\
                             --collection-name "\${COLLECTION_NAME}" \\
                             --start-time "\${REPORT_START_TIME}" \\
                             --end-time "\${REPORT_END_TIME}" \\
-                            --format json \\
-                            --output "\${JSON_REPORT}" \\
-                            --loki-url "${params.loki_url}" \\
-                            --prometheus-url "${params.prometheus_url}" \\
-                            --pod-pattern "\${POD_PATTERN}" \\
-                            --namespace "${env.NAMESPACE}" \\
-                            --timeout 60 \\
-                            --max-logs 50000 || echo "JSON report generation failed, but continuing..."
-                        
-                        echo "Generating CSV performance summary..."
-                        pdm run milvus-ingest report generate \\
-                            --job-id "\${JOB_IDS}" \\
-                            --collection-name "\${COLLECTION_NAME}" \\
-                            --start-time "\${REPORT_START_TIME}" \\
-                            --end-time "\${REPORT_END_TIME}" \\
-                            --format csv \\
                             --output "\${CSV_REPORT}" \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
                             --pod-pattern "\${POD_PATTERN}" \\
-                            --namespace "${env.NAMESPACE}" \\
-                            --timeout 60 \\
-                            --max-logs 50000 || echo "CSV report generation failed, but continuing..."
+                            --release-name "${env.RELEASE_NAME}" \\
+                            --milvus-namespace "${env.NAMESPACE}" \\
+                            --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
+                            --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
+                            --timeout 60 || echo "CSV report generation failed, but continuing..."
                         
                         # Copy reports to Jenkins artifacts directory
                         mkdir -p ${env.ARTIFACTS}/reports
                         cp -f ${env.IMPORT_INFO} ${env.ARTIFACTS}/import_info.json || true
-                        cp -f "\${HTML_REPORT}" ${env.ARTIFACTS}/reports/ || true
-                        cp -f "\${JSON_REPORT}" ${env.ARTIFACTS}/reports/ || true
                         cp -f "\${CSV_REPORT}" ${env.ARTIFACTS}/reports/ || true
                         
                         # Generate a summary report for easy consumption
@@ -676,8 +656,6 @@ Import Details:
 - Import End: \${IMPORT_END_TIME}
 
 Report Files:
-- HTML Report: import-performance-report-${env.BUILD_ID}.html
-- JSON Data: import-performance-data-${env.BUILD_ID}.json
 - CSV Summary: import-performance-summary-${env.BUILD_ID}.csv
 - Import Info: import_info.json
 

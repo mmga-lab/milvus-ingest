@@ -37,7 +37,8 @@ from .logging_config import (
 )
 from .milvus_inserter import MilvusInserter
 from .models import get_schema_help, validate_schema_data
-from .report import ReportConfig, ReportGenerator
+from .report.models import ReportConfig
+from .report.report_generator import ReportGenerator
 from .rich_display import (
     display_error,
     display_schema_details,
@@ -1273,199 +1274,87 @@ def report() -> None:
     pass
 
 
+
 @report.command("generate")
-@click.option("--job-id", help="Specific job ID to analyze (e.g., import job UUID)")
-@click.option("--collection-name", help="Collection name to filter data by")
-@click.option(
-    "--start-time", help="Start time for analysis (ISO format: 2024-01-01T10:00:00)"
-)
-@click.option(
-    "--end-time", help="End time for analysis (ISO format: 2024-01-01T11:00:00)"
-)
-@click.option(
-    "--duration-hours",
-    type=int,
-    default=1,
-    help="Duration in hours to analyze (default: 1, used if start-time not specified)",
-)
-@click.option(
-    "--output",
-    "-o",
-    default="report.html",
-    help="Output file path (default: report.html)",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["html", "json", "csv"]),
-    default="html",
-    help="Output format (default: html)",
-)
-@click.option(
-    "--loki-url",
-    default="http://10.100.36.154:80",
-    help="Loki server URL (default: http://10.100.36.154:80)",
-)
-@click.option(
-    "--prometheus-url",
-    default="http://10.100.36.157:9090",
-    help="Prometheus server URL (default: http://10.100.36.157:9090)",
-)
-@click.option(
-    "--pod-pattern",
-    default=".*",
-    help="Pod name pattern for log filtering (default: .*)",
-)
-@click.option(
-    "--max-logs",
-    type=int,
-    default=20000,
-    help="Maximum number of log entries to fetch (default: 20000)",
-)
-@click.option(
-    "--timeout", type=int, default=30, help="Request timeout in seconds (default: 30)"
-)
+@click.option("--job-ids", multiple=True, help="Job IDs to analyze (can specify multiple)")
+@click.option("--collection-name", help="Collection name")
+@click.option("--start-time", help="Start time (ISO format: 2024-01-01T10:00:00)")
+@click.option("--end-time", help="End time (ISO format: 2024-01-01T11:00:00)")
+@click.option("--output", "-o", default="/tmp/import_summary.csv", help="Output CSV file")
+@click.option("--loki-url", default="http://10.100.36.154:80", help="Loki server URL")
+@click.option("--prometheus-url", default="http://10.100.36.157:9090", help="Prometheus server URL")
+@click.option("--pod-pattern", default="import-stable-test-.*", help="Pod name pattern")
+@click.option("--timeout", type=int, default=30, help="Query timeout in seconds")
+@click.option("--test-scenario", help="Test scenario name (e.g., 'Large Parquet Import')")
+@click.option("--notes", help="Additional notes for the test")
+@click.option("--release-name", help="Milvus release name (for Prometheus queries)")
+@click.option("--milvus-namespace", help="Milvus namespace (for Prometheus queries)")
 def generate_report(
-    job_id: str | None = None,
-    collection_name: str | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
-    duration_hours: int = 1,
-    output: str = "report.html",
-    output_format: str = "html",
-    loki_url: str = "http://10.100.36.154:80",
-    prometheus_url: str = "http://10.100.36.157:9090",
-    pod_pattern: str = ".*",
-    max_logs: int = 20000,
-    timeout: int = 30,
+    job_ids: tuple,
+    collection_name: Optional[str],
+    start_time: Optional[str],
+    end_time: Optional[str],
+    output: str,
+    loki_url: str,
+    prometheus_url: str,
+    pod_pattern: str,
+    timeout: int,
+    test_scenario: Optional[str],
+    notes: Optional[str],
+    release_name: Optional[str],
+    milvus_namespace: Optional[str],
 ) -> None:
-    """Generate comprehensive import performance report from Loki and Prometheus.
-
-    Analyzes import job performance by collecting logs from Loki and metrics from
-    Prometheus, then generates detailed reports with insights and recommendations.
-
-    \b
-    Examples:
-        # Generate report for last hour
-        milvus-ingest report generate
-
-        # Generate report for specific job
-        milvus-ingest report generate --job-id abc123def456
-
-        # Generate report for specific time range
-        milvus-ingest report generate --start-time 2024-01-01T10:00:00 --end-time 2024-01-01T11:00:00
-
-        # Generate JSON report for specific collection
-        milvus-ingest report generate --collection-name products --format json --output analysis.json
-
-        # Generate report with custom data sources
-        milvus-ingest report generate --loki-url http://loki:3100 --prometheus-url http://prometheus:9090
-    """
-    logger = get_logger(__name__)
-
-    try:
-        # Parse time strings if provided
-        start_dt = None
-        end_dt = None
-
-        if start_time:
-            from datetime import datetime
-
-            try:
-                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            except ValueError as e:
-                display_error(f"Invalid start-time format: {e}")
-                click.echo(
-                    "Use ISO format: 2024-01-01T10:00:00 or 2024-01-01T10:00:00Z"
-                )
-                raise SystemExit(1) from e
-
-        if end_time:
-            from datetime import datetime
-
-            try:
-                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-            except ValueError as e:
-                display_error(f"Invalid end-time format: {e}")
-                click.echo(
-                    "Use ISO format: 2024-01-01T10:00:00 or 2024-01-01T10:00:00Z"
-                )
-                raise SystemExit(1) from e
-
-        # Create report configuration
-        config = ReportConfig(
-            loki_url=loki_url,
-            prometheus_url=prometheus_url,
-            job_id_pattern=job_id,
-            collection_name=collection_name,
-            pod_pattern=pod_pattern,
-            start_time=start_dt,
-            end_time=end_dt,
-            duration_hours=duration_hours,
-            output_format=output_format,
-            output_file=output,
-            max_log_entries=max_logs,
-            timeout_seconds=timeout,
-        )
-
-        # Create report generator
-        generator = ReportGenerator(config)
-
-        # Generate report
-        click.echo("🔍 Collecting data from Loki and Prometheus...")
-        report_data = generator.generate_report(
-            job_id=job_id,
-            collection_name=collection_name,
-            start_time=start_dt,
-            end_time=end_dt,
-        )
-
-        # Save report
-        click.echo(f"📊 Generating {output_format.upper()} report...")
-        saved_path = generator.save_report(report_data, output, output_format)
-
-        # Display success message with summary
-        details = []
-        details.append(
-            f"Time range: {report_data.time_range_start.strftime('%Y-%m-%d %H:%M')} - {report_data.time_range_end.strftime('%Y-%m-%d %H:%M')}"
-        )
-        details.append(f"Import jobs analyzed: {report_data.total_jobs}")
-        details.append(f"Successful jobs: {report_data.successful_jobs}")
-        details.append(f"Failed jobs: {report_data.failed_jobs}")
-        details.append(f"Loki log entries: {len(report_data.loki_logs)}")
-        details.append(f"Prometheus metrics: {len(report_data.prometheus_metrics)}")
-        details.append(f"Insights found: {len(report_data.bottlenecks)}")
-        details.append(f"Recommendations: {len(report_data.recommendations)}")
-
-        display_success(
-            f"Report generated successfully: {saved_path}", "\n".join(details)
-        )
-
-        # Log performance summary
-        logger.info(
-            "Report generation completed",
-            extra={
-                "report_id": report_data.report_id,
-                "output_file": saved_path,
-                "total_jobs": report_data.total_jobs,
-                "successful_jobs": report_data.successful_jobs,
-                "failed_jobs": report_data.failed_jobs,
-                "format": output_format,
-            },
-        )
-
-    except Exception as e:
-        log_error_with_context(
-            e,
-            {
-                "operation": "report_generation",
-                "job_id": job_id,
-                "collection_name": collection_name,
-                "output_format": output_format,
-            },
-        )
-        display_error(f"Report generation failed: {e}")
-        raise SystemExit(1) from e
+    """Generate CSV report for import analysis with Prometheus metrics."""
+    from datetime import datetime, timedelta
+    
+    # Parse time parameters
+    end_dt = datetime.fromisoformat(end_time) if end_time else datetime.now()
+    start_dt = datetime.fromisoformat(start_time) if start_time else end_dt - timedelta(hours=1)
+    
+    # Convert job_ids tuple to list
+    job_id_list = list(job_ids) if job_ids else None
+    
+    # Create config
+    config = ReportConfig(
+        loki_url=loki_url,
+        prometheus_url=prometheus_url,
+        pod_pattern=pod_pattern,
+        start_time=start_dt,
+        end_time=end_dt,
+        timeout_seconds=timeout,
+    )
+    
+    # Generate report
+    click.echo(f"📊 Generating import performance report...")
+    if job_id_list:
+        click.echo(f"   Job IDs: {', '.join(job_id_list)}")
+    
+    report_gen = ReportGenerator(config)
+    result = report_gen.generate_report(
+        job_ids=job_id_list,
+        collection_name=collection_name,
+        start_time=start_dt,
+        end_time=end_dt,
+        output_file=output,
+        test_scenario=test_scenario,
+        notes=notes,
+        release_name=release_name,
+        milvus_namespace=milvus_namespace,
+    )
+    
+    # Display summary
+    click.echo(f"✅ Report saved to: {output}")
+    click.echo(f"   Jobs analyzed: {result['jobs_analyzed']}")
+    click.echo(f"   Total import time: {result['total_import_time']:.2f} seconds")
+    
+    # Show job summaries
+    for job_id, summary in result['job_summaries'].items():
+        click.echo(f"\n   Job {job_id}:")
+        click.echo(f"     Collection: {summary.get('collection_name', 'N/A')}")
+        click.echo(f"     Total time: {summary.get('total_time', 0):.2f}s")
+        if summary.get('phases'):
+            for phase, time in summary['phases'].items():
+                click.echo(f"     {phase}: {time:.2f}s")
 
 
 @to_milvus.command("import")

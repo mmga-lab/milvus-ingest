@@ -1,17 +1,17 @@
-"""Prometheus data collector for Milvus import performance metrics."""
+"""Prometheus collector for Milvus import performance metrics with time range support."""
 
 from __future__ import annotations
 
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 from ..logging_config import get_logger
-from .models import PrometheusMetricData, SystemMetrics, MilvusClusterMetrics, ReportConfig
+from .models import ReportConfig
 
 
-class PrometheusDataCollector:
-    """Collector for Prometheus metrics related to Milvus imports."""
+class PrometheusCollector:
+    """Prometheus collector with time range support and min/max/avg calculations."""
     
     def __init__(self, config: ReportConfig):
         """Initialize the Prometheus collector.
@@ -22,411 +22,266 @@ class PrometheusDataCollector:
         self.config = config
         self.prometheus_url = config.prometheus_url.rstrip('/')
         self.logger = get_logger(__name__)
-        
-        # Cache for available metrics
-        self._available_metrics: Optional[List[str]] = None
     
-    def collect_import_metrics(
-        self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        step: str = '30s',
-    ) -> List[PrometheusMetricData]:
-        """Collect Milvus import-related metrics.
-        
-        Args:
-            start_time: Start time for query range
-            end_time: End time for query range  
-            step: Query step size (e.g., '30s', '1m')
-            
-        Returns:
-            List of Prometheus metric data points
-        """
-        # Use config defaults if not provided
-        start_time = start_time or self.config.start_time
-        end_time = end_time or self.config.end_time
-        
-        # Set default time range if not specified
-        if not end_time:
-            end_time = datetime.now()
-        if not start_time:
-            start_time = end_time - timedelta(hours=self.config.duration_hours)
-        
-        self.logger.info(
-            "Collecting Prometheus import metrics",
-            extra={
-                "start_time": start_time,
-                "end_time": end_time,
-                "step": step,
-            }
+    def query_prometheus(self, query: str) -> dict:
+        """Execute a Prometheus instant query."""
+        response = requests.get(
+            f"{self.prometheus_url}/api/v1/query",
+            params={"query": query},
+            timeout=self.config.timeout_seconds,
         )
+        response.raise_for_status()
+        return response.json()
+
+    def query_prometheus_range(self, query: str, start_time: datetime, end_time: datetime, step: str = "30s") -> dict:
+        """Execute a Prometheus range query."""
+        params = {
+            "query": query,
+            "start": int(start_time.timestamp()),
+            "end": int(end_time.timestamp()),
+            "step": step
+        }
+        response = requests.get(
+            f"{self.prometheus_url}/api/v1/query_range",
+            params=params,
+            timeout=self.config.timeout_seconds,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def calculate_stats(self, values: list) -> dict:
+        """Calculate min, max, average from a list of values."""
+        if not values:
+            return {"min": 0, "max": 0, "avg": 0}
         
-        # Define import-related metrics to collect
-        import_metrics = [
-            # Import job metrics
-            "milvus_datacoord_import_jobs",
-            "milvus_datacoord_import_tasks",
-            "milvus_datacoord_import_job_latency_sum",
-            "milvus_datacoord_import_task_latency_sum",
-            "milvus_datacoord_bulk_insert_vectors_count",
-            
-            # Data ingestion metrics
-            "milvus_proxy_insert_vectors_count",
-            "milvus_datanode_consume_msg_count", 
-            "milvus_datanode_consume_bytes_count",
-            "milvus_datanode_flushed_data_rows",
-            "milvus_datanode_flushed_data_size",
-            
-            # Storage growth metrics
-            "milvus_datacoord_stored_rows_num",
-            "milvus_datacoord_stored_binlog_size",
-            "milvus_datacoord_stored_index_files_size",
-            "milvus_datacoord_segment_num",
-            "milvus_datacoord_collection_num",
-            
-            # Performance metrics
-            "milvus_proxy_insert_latency_sum",
-            "milvus_proxy_search_latency_sum",
-            "milvus_datanode_save_latency_sum",
-            "milvus_datacoord_compaction_latency_sum",
+        values = [float(v) for v in values if v is not None]
+        if not values:
+            return {"min": 0, "max": 0, "avg": 0}
+        
+        return {
+            "min": min(values),
+            "max": max(values),
+            "avg": sum(values) / len(values)
+        }
+
+    def collect_datanode_metrics(
+        self, 
+        release_name: str, 
+        namespace: str, 
+        start_time: Optional[datetime] = None, 
+        end_time: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Get DataNode memory and CPU metrics with optional time range support."""
+        metrics = {}
+        
+        # DataNode Memory (in GB)
+        memory_query = f'sum(container_memory_working_set_bytes{{cluster="", namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*", container!="", image!=""}}) by (container)'
+        
+        if start_time and end_time:
+            try:
+                result = self.query_prometheus_range(memory_query, start_time, end_time)
+                if result['data']['result']:
+                    all_values = []
+                    for series in result['data']['result']:
+                        for timestamp, value in series['values']:
+                            all_values.append(float(value))
+                    
+                    if all_values:
+                        all_values_gb = [v / (1024 * 1024 * 1024) for v in all_values]
+                        memory_stats = self.calculate_stats(all_values_gb)
+                        metrics['datanode_memory_gb'] = memory_stats
+                        metrics['datanode_container'] = result['data']['result'][0]['metric'].get('container', 'unknown')
+                    else:
+                        metrics['datanode_memory_gb'] = {"min": 0, "max": 0, "avg": 0}
+                else:
+                    metrics['datanode_memory_gb'] = {"min": 0, "max": 0, "avg": 0}
+            except Exception as e:
+                self.logger.warning(f"Error querying DataNode memory range: {e}")
+                metrics['datanode_memory_gb'] = {"min": 0, "max": 0, "avg": 0}
+        else:
+            try:
+                result = self.query_prometheus(memory_query)
+                if result['data']['result']:
+                    total_memory_bytes = sum(float(r['value'][1]) for r in result['data']['result'])
+                    metrics['datanode_memory_gb'] = total_memory_bytes / (1024 * 1024 * 1024)
+                    metrics['datanode_container'] = result['data']['result'][0]['metric'].get('container', 'unknown')
+                else:
+                    metrics['datanode_memory_gb'] = 0
+            except Exception as e:
+                self.logger.warning(f"Error querying DataNode memory: {e}")
+                metrics['datanode_memory_gb'] = 0
+        
+        # DataNode CPU (cores)
+        cpu_query = f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}", pod=~"{release_name}-milvus-datanode-.*"}}[5m]))'
+        
+        if start_time and end_time:
+            try:
+                result = self.query_prometheus_range(cpu_query, start_time, end_time)
+                if result['data']['result']:
+                    all_values = []
+                    for series in result['data']['result']:
+                        for timestamp, value in series['values']:
+                            all_values.append(float(value))
+                    
+                    cpu_stats = self.calculate_stats(all_values)
+                    metrics['datanode_cpu_cores'] = cpu_stats
+                else:
+                    metrics['datanode_cpu_cores'] = {"min": 0, "max": 0, "avg": 0}
+            except Exception as e:
+                self.logger.warning(f"Error querying DataNode CPU range: {e}")
+                metrics['datanode_cpu_cores'] = {"min": 0, "max": 0, "avg": 0}
+        else:
+            try:
+                result = self.query_prometheus(cpu_query)
+                if result['data']['result']:
+                    total_cpu = sum(float(r['value'][1]) for r in result['data']['result'])
+                    metrics['datanode_cpu_cores'] = total_cpu
+                else:
+                    metrics['datanode_cpu_cores'] = 0
+            except Exception as e:
+                self.logger.warning(f"Error querying DataNode CPU: {e}")
+                metrics['datanode_cpu_cores'] = 0
+        
+        return metrics
+
+    def collect_s3_minio_metrics(
+        self, 
+        release_name: str, 
+        namespace: str, 
+        start_time: Optional[datetime] = None, 
+        end_time: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """Get S3/MinIO IOPS and throughput metrics with optional time range support."""
+        metrics = {}
+        
+        # S3/MinIO IOPS using filesystem I/O operations
+        reads_query = f'sum(rate(container_fs_reads_total{{container!="", cluster="", namespace="{namespace}", pod=~".*minio.*"}}[5m]))'
+        writes_query = f'sum(rate(container_fs_writes_total{{container!="", cluster="", namespace="{namespace}", pod=~".*minio.*"}}[5m]))'
+        
+        if start_time and end_time:
+            try:
+                total_iops_values = []
+                
+                # Get reads over time
+                result = self.query_prometheus_range(reads_query, start_time, end_time)
+                reads_values = []
+                if result['data']['result']:
+                    for series in result['data']['result']:
+                        for timestamp, value in series['values']:
+                            reads_values.append(float(value))
+                
+                # Get writes over time
+                result = self.query_prometheus_range(writes_query, start_time, end_time)
+                writes_values = []
+                if result['data']['result']:
+                    for series in result['data']['result']:
+                        for timestamp, value in series['values']:
+                            writes_values.append(float(value))
+                
+                # Combine reads and writes
+                max_len = max(len(reads_values), len(writes_values))
+                for i in range(max_len):
+                    reads = reads_values[i] if i < len(reads_values) else 0
+                    writes = writes_values[i] if i < len(writes_values) else 0
+                    total_iops_values.append(reads + writes)
+                
+                iops_stats = self.calculate_stats(total_iops_values)
+                metrics['s3_minio_iops'] = iops_stats
+            except Exception as e:
+                self.logger.warning(f"Error querying S3/MinIO IOPS range: {e}")
+                metrics['s3_minio_iops'] = {"min": 0, "max": 0, "avg": 0}
+        else:
+            try:
+                total_iops = 0
+                
+                # Get reads
+                result = self.query_prometheus(reads_query)
+                if result['data']['result']:
+                    total_iops += float(result['data']['result'][0]['value'][1])
+                
+                # Get writes
+                result = self.query_prometheus(writes_query)
+                if result['data']['result']:
+                    total_iops += float(result['data']['result'][0]['value'][1])
+                
+                metrics['s3_minio_iops'] = total_iops
+            except Exception as e:
+                self.logger.warning(f"Error querying S3/MinIO IOPS: {e}")
+                # Fallback to S3 API requests
+                try:
+                    iops_query = 'sum(rate(minio_s3_requests_total[5m]))'
+                    result = self.query_prometheus(iops_query)
+                    if result['data']['result']:
+                        metrics['s3_minio_iops'] = float(result['data']['result'][0]['value'][1])
+                    else:
+                        metrics['s3_minio_iops'] = 0
+                except:
+                    metrics['s3_minio_iops'] = 0
+        
+        # S3/MinIO Throughput (bytes/sec -> MB/sec)
+        throughput_queries = [
+            'sum(rate(minio_s3_traffic_sent_bytes[5m])) + sum(rate(minio_s3_traffic_received_bytes[5m]))',
+            'sum(rate(minio_inter_node_traffic_sent_bytes[5m])) + sum(rate(minio_inter_node_traffic_received_bytes[5m]))',
+            'sum(rate(minio_bucket_traffic_sent_bytes[5m])) + sum(rate(minio_bucket_traffic_received_bytes[5m]))'
         ]
         
-        all_metrics = []
-        available_metrics = self._get_available_metrics()
+        for query in throughput_queries:
+            try:
+                if start_time and end_time:
+                    result = self.query_prometheus_range(query, start_time, end_time)
+                    if result['data']['result']:
+                        all_values = []
+                        for series in result['data']['result']:
+                            for timestamp, value in series['values']:
+                                bytes_per_sec = float(value)
+                                all_values.append(bytes_per_sec / (1024 * 1024))  # Convert to MB/s
+                        
+                        throughput_stats = self.calculate_stats(all_values)
+                        metrics['s3_minio_throughput_mbps'] = throughput_stats
+                        break
+                else:
+                    result = self.query_prometheus(query)
+                    if result['data']['result']:
+                        bytes_per_sec = float(result['data']['result'][0]['value'][1])
+                        metrics['s3_minio_throughput_mbps'] = bytes_per_sec / (1024 * 1024)  # Convert to MB/s
+                        break
+            except Exception:
+                continue
         
-        for metric_name in import_metrics:
-            if metric_name in available_metrics:
-                try:
-                    metrics = self._query_metric_range(
-                        metric_name, start_time, end_time, step
-                    )
-                    all_metrics.extend(metrics)
-                    self.logger.debug(f"Collected {len(metrics)} data points for {metric_name}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to collect metric {metric_name}: {e}")
+        if 's3_minio_throughput_mbps' not in metrics:
+            if start_time and end_time:
+                metrics['s3_minio_throughput_mbps'] = {"min": 0, "max": 0, "avg": 0}
             else:
-                self.logger.debug(f"Metric {metric_name} not available in Prometheus")
+                metrics['s3_minio_throughput_mbps'] = 0
         
-        self.logger.info(f"Collected {len(all_metrics)} total metric data points")
-        return all_metrics
-    
-    def collect_system_metrics(
-        self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        step: str = '30s',
-    ) -> List[SystemMetrics]:
-        """Collect system resource metrics during import operations.
+        return metrics
+
+    def collect_binlog_metrics(self, release_name: str) -> Dict[str, Any]:
+        """Get Milvus binlog count and size metrics."""
+        metrics = {}
         
-        Args:
-            start_time: Start time for query range
-            end_time: End time for query range
-            step: Query step size
-            
-        Returns:
-            List of system metrics data points
-        """
-        # Use config defaults if not provided
-        start_time = start_time or self.config.start_time
-        end_time = end_time or self.config.end_time
-        
-        # Set default time range if not specified
-        if not end_time:
-            end_time = datetime.now()
-        if not start_time:
-            start_time = end_time - timedelta(hours=self.config.duration_hours)
-        
-        self.logger.info("Collecting system resource metrics")
-        
-        # System resource queries
-        system_queries = {
-            'cpu_usage': '100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)',
-            'memory_usage_percent': '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100',
-            'memory_usage_bytes': 'node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes',
-            'disk_io_read': 'rate(node_disk_read_bytes_total[5m])',
-            'disk_io_write': 'rate(node_disk_written_bytes_total[5m])',
-            'network_rx': 'rate(node_network_receive_bytes_total[5m])',
-            'network_tx': 'rate(node_network_transmit_bytes_total[5m])',
-        }
-        
-        # Collect data for each timestamp
-        timestamps = self._get_time_range(start_time, end_time, step)
-        system_metrics = []
-        
-        for timestamp in timestamps:
-            metrics_data = {
-                'timestamp': timestamp,
-                'cpu_usage_percent': None,
-                'memory_usage_bytes': None,
-                'memory_usage_percent': None,
-                'disk_io_read_bytes': None,
-                'disk_io_write_bytes': None,
-                'network_rx_bytes': None,
-                'network_tx_bytes': None,
-            }
-            
-            for metric_key, query in system_queries.items():
-                try:
-                    result = self._query_instant(query, timestamp)
-                    if result:
-                        # Take the first result or average if multiple
-                        value = self._extract_single_value(result)
-                        if metric_key == 'cpu_usage':
-                            metrics_data['cpu_usage_percent'] = value
-                        elif metric_key == 'memory_usage_percent':
-                            metrics_data['memory_usage_percent'] = value
-                        elif metric_key == 'memory_usage_bytes':
-                            metrics_data['memory_usage_bytes'] = int(value) if value else None
-                        elif metric_key == 'disk_io_read':
-                            metrics_data['disk_io_read_bytes'] = int(value) if value else None
-                        elif metric_key == 'disk_io_write':
-                            metrics_data['disk_io_write_bytes'] = int(value) if value else None
-                        elif metric_key == 'network_rx':
-                            metrics_data['network_rx_bytes'] = int(value) if value else None
-                        elif metric_key == 'network_tx':
-                            metrics_data['network_tx_bytes'] = int(value) if value else None
-                            
-                except Exception as e:
-                    self.logger.warning(f"Failed to collect {metric_key}: {e}")
-            
-            system_metrics.append(SystemMetrics(**metrics_data))
-        
-        return system_metrics
-    
-    def collect_milvus_cluster_metrics(
-        self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        step: str = '30s',
-    ) -> List[MilvusClusterMetrics]:
-        """Collect Milvus cluster-level metrics.
-        
-        Args:
-            start_time: Start time for query range
-            end_time: End time for query range
-            step: Query step size
-            
-        Returns:
-            List of Milvus cluster metrics
-        """
-        # Use config defaults if not provided
-        start_time = start_time or self.config.start_time
-        end_time = end_time or self.config.end_time
-        
-        # Set default time range if not specified
-        if not end_time:
-            end_time = datetime.now()
-        if not start_time:
-            start_time = end_time - timedelta(hours=self.config.duration_hours)
-        
-        self.logger.info("Collecting Milvus cluster metrics")
-        
-        # Milvus aggregate queries
-        milvus_queries = {
-            'import_jobs_total': 'sum(milvus_datacoord_import_jobs)',
-            'import_tasks_total': 'sum(milvus_datacoord_import_tasks)',
-            'insert_vectors_count': 'sum(milvus_proxy_insert_vectors_count)',
-            'stored_binlog_size_bytes': 'sum(milvus_datacoord_stored_binlog_size)',
-            'stored_rows_total': 'sum(milvus_datacoord_stored_rows_num)',
-            'segment_count': 'sum(milvus_datacoord_segment_num)',
-            'collection_count': 'sum(milvus_datacoord_collection_num)',
-            'import_job_latency_ms': 'avg(rate(milvus_datacoord_import_job_latency_sum[5m]))',
-            'import_task_latency_ms': 'avg(rate(milvus_datacoord_import_task_latency_sum[5m]))',
-        }
-        
-        # Collect data for each timestamp
-        timestamps = self._get_time_range(start_time, end_time, step)
-        cluster_metrics = []
-        
-        for timestamp in timestamps:
-            metrics_data = {
-                'timestamp': timestamp,
-                'import_jobs_total': 0,
-                'import_tasks_total': 0,
-                'insert_vectors_count': 0,
-                'stored_binlog_size_bytes': 0,
-                'stored_rows_total': 0,
-                'segment_count': 0,
-                'collection_count': 0,
-                'import_job_latency_ms': None,
-                'import_task_latency_ms': None,
-            }
-            
-            for metric_key, query in milvus_queries.items():
-                try:
-                    result = self._query_instant(query, timestamp)
-                    if result:
-                        value = self._extract_single_value(result)
-                        if value is not None:
-                            if metric_key.endswith('_ms'):
-                                metrics_data[metric_key] = float(value) * 1000  # Convert to ms
-                            elif metric_key in ['import_jobs_total', 'import_tasks_total', 'insert_vectors_count', 
-                                              'stored_rows_total', 'segment_count', 'collection_count']:
-                                metrics_data[metric_key] = int(value)
-                            else:
-                                metrics_data[metric_key] = int(value)
-                                
-                except Exception as e:
-                    self.logger.warning(f"Failed to collect {metric_key}: {e}")
-            
-            cluster_metrics.append(MilvusClusterMetrics(**metrics_data))
-        
-        return cluster_metrics
-    
-    def _get_available_metrics(self) -> List[str]:
-        """Get list of available metrics from Prometheus."""
-        if self._available_metrics is not None:
-            return self._available_metrics
-        
+        # Binlog file count
+        count_query = f'sum(milvus_datacoord_segment_binlog_file_count{{app_kubernetes_io_instance="{release_name}"}})'
         try:
-            response = requests.get(
-                f"{self.prometheus_url}/api/v1/label/__name__/values",
-                timeout=self.config.timeout_seconds,
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            if data['status'] == 'success':
-                self._available_metrics = data['data']
-                return self._available_metrics
+            result = self.query_prometheus(count_query)
+            if result['data']['result']:
+                metrics['binlog_count'] = int(float(result['data']['result'][0]['value'][1]))
             else:
-                raise Exception(f"Failed to get metrics: {data}")
-                
+                metrics['binlog_count'] = 0
         except Exception as e:
-            self.logger.error(f"Failed to get available metrics: {e}")
-            return []
-    
-    def _query_metric_range(
-        self,
-        metric_name: str,
-        start_time: datetime,
-        end_time: datetime,
-        step: str = '30s',
-    ) -> List[PrometheusMetricData]:
-        """Query metric data over a time range."""
-        params = {
-            'query': metric_name,
-            'start': start_time.timestamp(),
-            'end': end_time.timestamp(),
-            'step': step,
-        }
+            self.logger.warning(f"Error querying binlog count: {e}")
+            metrics['binlog_count'] = 0
         
+        # Binlog total size (bytes -> GB)
+        size_query = f'sum(milvus_datacoord_stored_binlog_size{{app_kubernetes_io_instance="{release_name}"}})/1024/1024/1024'
         try:
-            response = requests.get(
-                f"{self.prometheus_url}/api/v1/query_range",
-                params=params,
-                timeout=self.config.timeout_seconds,
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            if data['status'] == 'success':
-                return self._parse_prometheus_data(data['data']['result'], metric_name)
+            result = self.query_prometheus(size_query)
+            if result['data']['result']:
+                metrics['binlog_size_gb'] = float(result['data']['result'][0]['value'][1])
             else:
-                raise Exception(f"Prometheus query failed: {data}")
-                
+                metrics['binlog_size_gb'] = 0
         except Exception as e:
-            raise Exception(f"Failed to query {metric_name}: {e}")
-    
-    def _query_instant(self, query: str, time: datetime) -> Optional[List[Dict]]:
-        """Query Prometheus for instant value at specific time."""
-        params = {
-            'query': query,
-            'time': time.timestamp(),
-        }
+            self.logger.warning(f"Error querying binlog size: {e}")
+            metrics['binlog_size_gb'] = 0
         
-        try:
-            response = requests.get(
-                f"{self.prometheus_url}/api/v1/query",
-                params=params,
-                timeout=self.config.timeout_seconds,
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            if data['status'] == 'success':
-                return data['data']['result']
-            else:
-                return None
-                
-        except Exception:
-            return None
-    
-    def _parse_prometheus_data(
-        self, 
-        results: List[Dict], 
-        metric_name: str
-    ) -> List[PrometheusMetricData]:
-        """Parse Prometheus query results into PrometheusMetricData objects."""
-        parsed_data = []
-        
-        for result in results:
-            labels = {k: v for k, v in result['metric'].items() if k != '__name__'}
-            
-            # Handle different result types
-            if 'values' in result:
-                # Range query result
-                for timestamp_val, value in result['values']:
-                    timestamp = datetime.fromtimestamp(float(timestamp_val))
-                    parsed_data.append(PrometheusMetricData(
-                        timestamp=timestamp,
-                        metric_name=metric_name,
-                        value=float(value),
-                        labels=labels,
-                    ))
-            elif 'value' in result:
-                # Instant query result
-                timestamp_val, value = result['value']
-                timestamp = datetime.fromtimestamp(float(timestamp_val))
-                parsed_data.append(PrometheusMetricData(
-                    timestamp=timestamp,
-                    metric_name=metric_name,
-                    value=float(value),
-                    labels=labels,
-                ))
-        
-        return parsed_data
-    
-    def _extract_single_value(self, results: List[Dict]) -> Optional[float]:
-        """Extract a single aggregated value from Prometheus results."""
-        if not results:
-            return None
-        
-        # If multiple results, take the first one or average them
-        if len(results) == 1:
-            return float(results[0]['value'][1])
-        else:
-            # Average multiple values
-            values = [float(r['value'][1]) for r in results]
-            return sum(values) / len(values)
-    
-    def _get_time_range(
-        self, 
-        start_time: datetime, 
-        end_time: datetime, 
-        step: str
-    ) -> List[datetime]:
-        """Generate list of timestamps for the given range and step."""
-        # Convert step to seconds
-        step_seconds = self._parse_step_to_seconds(step)
-        
-        timestamps = []
-        current = start_time
-        
-        while current <= end_time:
-            timestamps.append(current)
-            current += timedelta(seconds=step_seconds)
-        
-        return timestamps
-    
-    def _parse_step_to_seconds(self, step: str) -> int:
-        """Parse step string (e.g., '30s', '1m', '5m') to seconds."""
-        if step.endswith('s'):
-            return int(step[:-1])
-        elif step.endswith('m'):
-            return int(step[:-1]) * 60
-        elif step.endswith('h'):
-            return int(step[:-1]) * 3600
-        else:
-            # Default to seconds
-            return int(step)
+        return metrics

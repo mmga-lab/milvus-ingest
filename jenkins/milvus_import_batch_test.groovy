@@ -267,179 +267,104 @@ pipeline {
                     # Create aggregated reports directory
                     mkdir -p ${env.ARTIFACTS}/aggregated_reports
                     
-                    # Check if any reports were collected
-                    if [ -d "${env.BATCH_REPORTS_DIR}" ] && [ "\$(find ${env.BATCH_REPORTS_DIR} -name '*.html' -o -name '*.json' -o -name '*.csv' | wc -l)" -gt 0 ]; then
-                        echo "Found performance reports from individual tests"
+                    # Check if any CSV reports were collected
+                    CSV_FILES=\$(find ${env.BATCH_REPORTS_DIR} -name "*.csv" 2>/dev/null | wc -l)
+                    
+                    if [ "\${CSV_FILES}" -gt 0 ]; then
+                        echo "Found \${CSV_FILES} CSV reports from individual tests"
                         
-                        # Create index of all collected reports
-                        cat > ${env.ARTIFACTS}/aggregated_reports/reports_index.html << 'EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Batch Import Performance Reports - Build ${env.BUILD_NUMBER}</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f7fa; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; }
-        .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
-        .stat-card { background: white; padding: 25px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
-        .stat-number { font-size: 2.5em; font-weight: bold; color: #667eea; }
-        .stat-label { color: #666; margin-top: 8px; }
-        .reports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-        .report-card { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); padding: 20px; }
-        .report-title { font-size: 1.1em; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }
-        .report-details { color: #666; font-size: 0.9em; margin-bottom: 15px; }
-        .report-links a { display: inline-block; margin-right: 10px; padding: 5px 10px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; font-size: 0.8em; }
-        .report-links a:hover { background: #5a67d8; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🚀 Batch Import Performance Reports</h1>
-        <p><strong>Build:</strong> ${env.BUILD_NUMBER} | <strong>Job:</strong> ${env.JOB_NAME}</p>
-        <p><strong>Generated:</strong> \$(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
-    </div>
-
-    <div class="summary">
-        <div class="stat-card">
-            <div class="stat-number">${env.TOTAL_SCENARIOS}</div>
-            <div class="stat-label">Total Tests</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number" id="reportCount">0</div>
-            <div class="stat-label">Performance Reports</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number">\$(find ${env.BATCH_REPORTS_DIR} -name "*.html" 2>/dev/null | wc -l || echo 0)</div>
-            <div class="stat-label">HTML Reports</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number">\$(find ${env.BATCH_REPORTS_DIR} -name "*.json" 2>/dev/null | wc -l || echo 0)</div>
-            <div class="stat-label">JSON Data Files</div>
-        </div>
-    </div>
-
-    <div class="reports-grid" id="reportsGrid">
-        <!-- Reports will be added here by script below -->
-    </div>
-
-    <script>
-        // This will be populated by the shell script below
-    </script>
-</body>
-</html>
-EOF
-
-                        # Generate JavaScript to populate reports dynamically
-                        echo "<script>" >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                        echo "const reports = [" >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
+                        # Create the merged CSV file
+                        MERGED_CSV="${env.ARTIFACTS}/aggregated_reports/all_tests_performance_report.csv"
                         
-                        REPORT_COUNT=0
-                        # Find and process each test's reports
-                        find ${env.BATCH_REPORTS_DIR} -name "_artifacts" -type d | while read artifacts_dir; do
-                            if [ -d "\${artifacts_dir}/reports" ]; then
-                                test_name=\$(basename \$(dirname \${artifacts_dir}))
+                        # Initialize with header from first CSV file
+                        FIRST_CSV=\$(find ${env.BATCH_REPORTS_DIR} -name "*.csv" | head -1)
+                        if [ -f "\${FIRST_CSV}" ]; then
+                            # Copy header line
+                            head -1 "\${FIRST_CSV}" > "\${MERGED_CSV}"
+                            
+                            # Add all data lines from all CSV files (skip headers)
+                            find ${env.BATCH_REPORTS_DIR} -name "*.csv" | while read csv_file; do
+                                # Extract test name from path for identification
+                                test_dir=\$(dirname \$(dirname \$(dirname \${csv_file})))
+                                test_name=\$(basename \${test_dir})
                                 
-                                # Check for import_info.json to get test details
-                                if [ -f "\${artifacts_dir}/import_info.json" ]; then
-                                    # Extract test configuration from import_info.json
-                                    schema_type=\$(jq -r '.schema_type // "unknown"' "\${artifacts_dir}/import_info.json")
-                                    file_count=\$(jq -r '.file_count // "unknown"' "\${artifacts_dir}/import_info.json")
-                                    file_size=\$(jq -r '.file_size // "unknown"' "\${artifacts_dir}/import_info.json")
-                                    file_format=\$(jq -r '.file_format // "unknown"' "\${artifacts_dir}/import_info.json")
-                                    storage_version=\$(jq -r '.storage_version // "unknown"' "\${artifacts_dir}/import_info.json")
-                                    
-                                    # Copy reports to aggregated directory with test-specific names
-                                    for report_file in \${artifacts_dir}/reports/*; do
-                                        if [ -f "\${report_file}" ]; then
-                                            filename=\$(basename \${report_file})
-                                            new_name="\${test_name}_\${filename}"
-                                            cp "\${report_file}" "${env.ARTIFACTS}/aggregated_reports/\${new_name}"
-                                            
-                                            if [[ \${filename} == *.html ]]; then
-                                                # Add to JavaScript array
-                                                echo "  {" >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    name: '\${test_name}'," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    schema: '\${schema_type}'," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    fileCount: '\${file_count}'," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    fileSize: '\${file_size}'," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    format: '\${file_format}'," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    storage: '\${storage_version}'," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "    htmlReport: '\${new_name}'" >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                                echo "  }," >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html
-                                            fi
-                                        fi
-                                    done
-                                fi
-                            fi
-                        done
+                                # Add data lines (skip header) with test name prefix if possible
+                                tail -n +2 "\${csv_file}" | sed "s/^/\${test_name}: /" >> "\${MERGED_CSV}"
+                            done
+                            
+                            echo "✅ Successfully merged \${CSV_FILES} CSV reports into: \${MERGED_CSV}"
+                            echo "Total data rows: \$(( \$(wc -l < "\${MERGED_CSV}") - 1 ))"
+                            
+                        else
+                            echo "❌ No valid CSV files found to merge"
+                        fi
                         
-                        # Complete JavaScript and render reports
-                        cat >> ${env.ARTIFACTS}/aggregated_reports/reports_index.html << 'EOF'
-];
-
-// Populate the reports grid
-const reportsGrid = document.getElementById('reportsGrid');
-document.getElementById('reportCount').textContent = reports.length;
-
-reports.forEach(report => {
-    const card = document.createElement('div');
-    card.className = 'report-card';
-    
-    card.innerHTML = \`
-        <div class="report-title">\${report.name}</div>
-        <div class="report-details">
-            <strong>Schema:</strong> \${report.schema}<br>
-            <strong>Files:</strong> \${report.fileCount} × \${report.fileSize}<br>
-            <strong>Format:</strong> \${report.format}<br>
-            <strong>Storage:</strong> \${report.storage}
-        </div>
-        <div class="report-links">
-            <a href="\${report.htmlReport}" target="_blank">View Report</a>
-        </div>
-    \`;
-    
-    reportsGrid.appendChild(card);
-});
-</script>
-EOF
-
-                        # Create a summary CSV of all tests
-                        echo "Test Name,Schema Type,File Count,File Size,Format,Storage Version,Status" > ${env.ARTIFACTS}/aggregated_reports/batch_summary.csv
+                        # Create a simple summary file with test metadata
+                        SUMMARY_FILE="${env.ARTIFACTS}/aggregated_reports/test_summary.csv"
+                        echo "Test Name,Schema Type,File Count,File Size,Format,Storage Version,Status" > "\${SUMMARY_FILE}"
+                        
+                        # Extract metadata from import_info.json files
                         find ${env.BATCH_REPORTS_DIR} -name "import_info.json" | while read info_file; do
                             test_name=\$(basename \$(dirname \$(dirname \${info_file})))
-                            schema_type=\$(jq -r '.schema_type' \${info_file})
-                            file_count=\$(jq -r '.file_count' \${info_file})
-                            file_size=\$(jq -r '.file_size' \${info_file})
-                            file_format=\$(jq -r '.file_format' \${info_file})
-                            storage_version=\$(jq -r '.storage_version' \${info_file})
+                            schema_type=\$(jq -r '.test_parameters.schema_type' \${info_file} 2>/dev/null || echo "unknown")
+                            file_count=\$(jq -r '.test_parameters.file_count' \${info_file} 2>/dev/null || echo "unknown")
+                            file_size=\$(jq -r '.test_parameters.file_size' \${info_file} 2>/dev/null || echo "unknown")
+                            file_format=\$(jq -r '.test_parameters.file_format' \${info_file} 2>/dev/null || echo "unknown")
+                            storage_version=\$(jq -r '.test_parameters.storage_version' \${info_file} 2>/dev/null || echo "unknown")
                             
-                            echo "\${test_name},\${schema_type},\${file_count},\${file_size},\${file_format},\${storage_version},Completed" >> ${env.ARTIFACTS}/aggregated_reports/batch_summary.csv
+                            echo "\${test_name},\${schema_type},\${file_count},\${file_size},\${file_format},\${storage_version},Completed" >> "\${SUMMARY_FILE}"
                         done
                         
-                        echo "Aggregated \$(find ${env.ARTIFACTS}/aggregated_reports -name "*.html" | wc -l) HTML reports"
-                        echo "Created reports index at: ${env.ARTIFACTS}/aggregated_reports/reports_index.html"
+                        echo "✅ Created test summary: \${SUMMARY_FILE}"
+                        
+                        # Create a simple text report for easy reading
+                        REPORT_SUMMARY="${env.ARTIFACTS}/aggregated_reports/batch_report_summary.txt"
+                        cat > "\${REPORT_SUMMARY}" << EOF
+Batch Import Test Results Summary
+=================================
+
+Build Information:
+- Job: ${env.JOB_NAME}
+- Build: ${env.BUILD_NUMBER}
+- Total Test Scenarios: ${env.TOTAL_SCENARIOS}
+- CSV Reports Found: \${CSV_FILES}
+- Generated: \$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+Files Generated:
+- all_tests_performance_report.csv: Merged performance data from all tests
+- test_summary.csv: Test configuration and status summary
+- batch_report_summary.txt: This summary file
+
+Parameters Used:
+- Large Files: ${params.run_large_files}
+- Small Files: ${params.run_small_files}
+- JSON Format: ${params.test_json}
+- Parquet Format: ${params.test_parquet}
+- Storage V1: ${params.test_storage_v1}
+- Storage V2: ${params.test_storage_v2}
+- Generate Reports: ${params.generate_reports}
+
+Data Sources:
+- Loki URL: ${params.loki_url}
+- Prometheus URL: ${params.prometheus_url}
+EOF
+                        
+                        echo "✅ Created summary report: \${REPORT_SUMMARY}"
                         
                     else
-                        echo "No performance reports found from individual tests"
+                        echo "❌ No CSV reports found from individual tests"
                         
-                        cat > ${env.ARTIFACTS}/aggregated_reports/no_reports.html << EOF
-<!DOCTYPE html>
-<html>
-<head><title>No Reports Generated</title></head>
-<body>
-    <h1>No Performance Reports Generated</h1>
-    <p>Either report generation was disabled or all individual tests failed to produce reports.</p>
-    <p>Build: ${env.BUILD_NUMBER}</p>
-    <p>Total Scenarios: ${env.TOTAL_SCENARIOS}</p>
-</body>
-</html>
-EOF
+                        # Create empty summary file
+                        echo "No performance reports were generated from the batch tests." > ${env.ARTIFACTS}/aggregated_reports/no_reports.txt
+                        echo "This could be due to:" >> ${env.ARTIFACTS}/aggregated_reports/no_reports.txt
+                        echo "- Report generation was disabled" >> ${env.ARTIFACTS}/aggregated_reports/no_reports.txt
+                        echo "- All individual tests failed" >> ${env.ARTIFACTS}/aggregated_reports/no_reports.txt
+                        echo "- Issues with data collection" >> ${env.ARTIFACTS}/aggregated_reports/no_reports.txt
                     fi
                     
-                    # List all files in aggregated reports
-                    echo "Contents of aggregated reports directory:"
+                    # Show final contents
+                    echo ""
+                    echo "Final aggregated reports directory contents:"
                     ls -la ${env.ARTIFACTS}/aggregated_reports/ || true
                     """
                 }
