@@ -37,6 +37,7 @@ from .logging_config import (
 )
 from .milvus_inserter import MilvusInserter
 from .models import get_schema_help, validate_schema_data
+from .report import ReportConfig, ReportGenerator
 from .rich_display import (
     display_error,
     display_schema_details,
@@ -47,7 +48,6 @@ from .rich_display import (
 )
 from .schema_manager import get_schema_manager
 from .uploader import S3Uploader, parse_s3_url
-from .report import ReportGenerator, ReportConfig
 
 _OUTPUT_FORMATS = {"parquet", "json"}
 
@@ -375,10 +375,7 @@ def generate(
 
         # Calculate effective total rows for display
         # Check if both file_count and file_size are specified (rows will be calculated)
-        if file_count and file_size:
-            effective_display_rows = 0  # Will be calculated
-        else:
-            effective_display_rows = total_rows
+        effective_display_rows: int | str = 0 if file_count and file_size else total_rows
 
         # If both file_count and file_size are specified, estimate total rows for display
         if file_count and file_size and effective_display_rows == 0:
@@ -1277,67 +1274,56 @@ def report() -> None:
 
 
 @report.command("generate")
+@click.option("--job-id", help="Specific job ID to analyze (e.g., import job UUID)")
+@click.option("--collection-name", help="Collection name to filter data by")
 @click.option(
-    "--job-id",
-    help="Specific job ID to analyze (e.g., import job UUID)"
+    "--start-time", help="Start time for analysis (ISO format: 2024-01-01T10:00:00)"
 )
 @click.option(
-    "--collection-name",
-    help="Collection name to filter data by"
-)
-@click.option(
-    "--start-time",
-    help="Start time for analysis (ISO format: 2024-01-01T10:00:00)"
-)
-@click.option(
-    "--end-time",
-    help="End time for analysis (ISO format: 2024-01-01T11:00:00)"
+    "--end-time", help="End time for analysis (ISO format: 2024-01-01T11:00:00)"
 )
 @click.option(
     "--duration-hours",
     type=int,
     default=1,
-    help="Duration in hours to analyze (default: 1, used if start-time not specified)"
+    help="Duration in hours to analyze (default: 1, used if start-time not specified)",
 )
 @click.option(
     "--output",
     "-o",
     default="report.html",
-    help="Output file path (default: report.html)"
+    help="Output file path (default: report.html)",
 )
 @click.option(
     "--format",
     "output_format",
     type=click.Choice(["html", "json", "csv"]),
     default="html",
-    help="Output format (default: html)"
+    help="Output format (default: html)",
 )
 @click.option(
     "--loki-url",
     default="http://10.100.36.154:80",
-    help="Loki server URL (default: http://10.100.36.154:80)"
+    help="Loki server URL (default: http://10.100.36.154:80)",
 )
 @click.option(
     "--prometheus-url",
     default="http://10.100.36.157:9090",
-    help="Prometheus server URL (default: http://10.100.36.157:9090)"
+    help="Prometheus server URL (default: http://10.100.36.157:9090)",
 )
 @click.option(
     "--pod-pattern",
     default=".*",
-    help="Pod name pattern for log filtering (default: .*)"
+    help="Pod name pattern for log filtering (default: .*)",
 )
 @click.option(
     "--max-logs",
     type=int,
     default=20000,
-    help="Maximum number of log entries to fetch (default: 20000)"
+    help="Maximum number of log entries to fetch (default: 20000)",
 )
 @click.option(
-    "--timeout",
-    type=int,
-    default=30,
-    help="Request timeout in seconds (default: 30)"
+    "--timeout", type=int, default=30, help="Request timeout in seconds (default: 30)"
 )
 def generate_report(
     job_id: str | None = None,
@@ -1354,52 +1340,58 @@ def generate_report(
     timeout: int = 30,
 ) -> None:
     """Generate comprehensive import performance report from Loki and Prometheus.
-    
+
     Analyzes import job performance by collecting logs from Loki and metrics from
     Prometheus, then generates detailed reports with insights and recommendations.
-    
+
     \b
     Examples:
         # Generate report for last hour
         milvus-ingest report generate
-        
+
         # Generate report for specific job
         milvus-ingest report generate --job-id abc123def456
-        
+
         # Generate report for specific time range
         milvus-ingest report generate --start-time 2024-01-01T10:00:00 --end-time 2024-01-01T11:00:00
-        
+
         # Generate JSON report for specific collection
         milvus-ingest report generate --collection-name products --format json --output analysis.json
-        
+
         # Generate report with custom data sources
         milvus-ingest report generate --loki-url http://loki:3100 --prometheus-url http://prometheus:9090
     """
     logger = get_logger(__name__)
-    
+
     try:
         # Parse time strings if provided
         start_dt = None
         end_dt = None
-        
+
         if start_time:
             from datetime import datetime
+
             try:
-                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
             except ValueError as e:
                 display_error(f"Invalid start-time format: {e}")
-                click.echo("Use ISO format: 2024-01-01T10:00:00 or 2024-01-01T10:00:00Z")
+                click.echo(
+                    "Use ISO format: 2024-01-01T10:00:00 or 2024-01-01T10:00:00Z"
+                )
                 raise SystemExit(1) from e
-                
+
         if end_time:
             from datetime import datetime
+
             try:
-                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
             except ValueError as e:
                 display_error(f"Invalid end-time format: {e}")
-                click.echo("Use ISO format: 2024-01-01T10:00:00 or 2024-01-01T10:00:00Z")
+                click.echo(
+                    "Use ISO format: 2024-01-01T10:00:00 or 2024-01-01T10:00:00Z"
+                )
                 raise SystemExit(1) from e
-        
+
         # Create report configuration
         config = ReportConfig(
             loki_url=loki_url,
@@ -1415,10 +1407,10 @@ def generate_report(
             max_log_entries=max_logs,
             timeout_seconds=timeout,
         )
-        
+
         # Create report generator
         generator = ReportGenerator(config)
-        
+
         # Generate report
         click.echo("🔍 Collecting data from Loki and Prometheus...")
         report_data = generator.generate_report(
@@ -1427,14 +1419,16 @@ def generate_report(
             start_time=start_dt,
             end_time=end_dt,
         )
-        
+
         # Save report
         click.echo(f"📊 Generating {output_format.upper()} report...")
         saved_path = generator.save_report(report_data, output, output_format)
-        
+
         # Display success message with summary
         details = []
-        details.append(f"Time range: {report_data.time_range_start.strftime('%Y-%m-%d %H:%M')} - {report_data.time_range_end.strftime('%Y-%m-%d %H:%M')}")
+        details.append(
+            f"Time range: {report_data.time_range_start.strftime('%Y-%m-%d %H:%M')} - {report_data.time_range_end.strftime('%Y-%m-%d %H:%M')}"
+        )
         details.append(f"Import jobs analyzed: {report_data.total_jobs}")
         details.append(f"Successful jobs: {report_data.successful_jobs}")
         details.append(f"Failed jobs: {report_data.failed_jobs}")
@@ -1442,12 +1436,11 @@ def generate_report(
         details.append(f"Prometheus metrics: {len(report_data.prometheus_metrics)}")
         details.append(f"Insights found: {len(report_data.bottlenecks)}")
         details.append(f"Recommendations: {len(report_data.recommendations)}")
-        
+
         display_success(
-            f"Report generated successfully: {saved_path}",
-            "\n".join(details)
+            f"Report generated successfully: {saved_path}", "\n".join(details)
         )
-        
+
         # Log performance summary
         logger.info(
             "Report generation completed",
@@ -1458,18 +1451,18 @@ def generate_report(
                 "successful_jobs": report_data.successful_jobs,
                 "failed_jobs": report_data.failed_jobs,
                 "format": output_format,
-            }
+            },
         )
-        
+
     except Exception as e:
         log_error_with_context(
-            e, 
+            e,
             {
                 "operation": "report_generation",
                 "job_id": job_id,
                 "collection_name": collection_name,
                 "output_format": output_format,
-            }
+            },
         )
         display_error(f"Report generation failed: {e}")
         raise SystemExit(1) from e
@@ -1605,11 +1598,11 @@ def import_to_milvus(
         # Upload and import then wait for completion
         milvus-ingest to-milvus import --local-path ./output/ --s3-path data/ --bucket my-bucket --endpoint-url http://minio:9000 --wait --use-mc
     """
+    import json
+    from datetime import datetime
+
     from .milvus_importer import MilvusBulkImporter
     from .uploader import S3Uploader
-    import json
-    import os
-    from datetime import datetime
 
     # Record import start time
     import_start_time = datetime.now()
@@ -1685,13 +1678,15 @@ def import_to_milvus(
         if len(job_ids) == 1:
             print(f"✓ Import job started: {job_ids[0]}")
         else:
-            print(f"✓ {len(job_ids)} import jobs started (batched due to {len(data_files)} files)")
+            print(
+                f"✓ {len(job_ids)} import jobs started (batched due to {len(data_files)} files)"
+            )
             print(f"✓ Job IDs: {', '.join(job_ids)}")
         print(f"✓ Collection: {final_collection_name}")
 
         # Record import completion time
         import_end_time = datetime.now()
-        
+
         # Wait for completion if requested
         import_success = True
         if wait:
@@ -1713,7 +1708,7 @@ def import_to_milvus(
                 print(
                     f"{len(job_ids)} import jobs are running asynchronously. Monitor with job IDs: {', '.join(job_ids)}"
                 )
-        
+
         # Prepare import information structure
         import_info = {
             "status": "completed" if import_success else "failed",
@@ -1721,57 +1716,66 @@ def import_to_milvus(
             "job_ids": job_ids,
             "import_start_time": import_start_time.isoformat(),
             "import_end_time": import_end_time.isoformat(),
-            "total_duration_seconds": (import_end_time - import_start_time).total_seconds(),
+            "total_duration_seconds": (
+                import_end_time - import_start_time
+            ).total_seconds(),
             "milvus_uri": uri,
             "milvus_token_used": bool(token.strip()),
             "s3_bucket": bucket,
             "s3_path": s3_path,
             "s3_endpoint": endpoint_url,
-            "upload_method": "mc_cli" if use_mc else ("boto3" if use_boto3 else "aws_cli"),
+            "upload_method": "mc_cli"
+            if use_mc
+            else ("boto3" if use_boto3 else "aws_cli"),
             "drop_if_exists": drop_if_exists,
             "use_autoindex": use_autoindex,
             "wait_for_completion": wait,
             "timeout": timeout,
             "total_files": len(data_files),
-            "file_types": list(set([f.split('.')[-1] for f in data_files])),
+            "file_types": list({f.split(".")[-1] for f in data_files}),
             "schema_metadata": {
                 "schema_type": metadata.get("schema_type", "unknown"),
                 "fields_count": len(metadata.get("schema", {}).get("fields", [])),
                 "vector_fields": [
-                    f["name"] for f in metadata.get("schema", {}).get("fields", [])
-                    if f.get("type") in ["FLOAT_VECTOR", "BINARY_VECTOR", "SPARSE_FLOAT_VECTOR"]
+                    f["name"]
+                    for f in metadata.get("schema", {}).get("fields", [])
+                    if f.get("type")
+                    in ["FLOAT_VECTOR", "BINARY_VECTOR", "SPARSE_FLOAT_VECTOR"]
                 ],
                 "has_dynamic_fields": any(
-                    f.get("is_dynamic", False) for f in metadata.get("schema", {}).get("fields", [])
+                    f.get("is_dynamic", False)
+                    for f in metadata.get("schema", {}).get("fields", [])
                 ),
                 "has_partition_key": any(
-                    f.get("is_partition_key", False) for f in metadata.get("schema", {}).get("fields", [])
+                    f.get("is_partition_key", False)
+                    for f in metadata.get("schema", {}).get("fields", [])
                 ),
             },
             "generation_metadata": metadata.get("generation", {}),
         }
-        
+
         # Output import info to file if requested
         if output_import_info:
             try:
                 # Ensure parent directory exists
                 output_import_info.parent.mkdir(parents=True, exist_ok=True)
-                
-                with open(output_import_info, 'w', encoding='utf-8') as f:
+
+                with open(output_import_info, "w", encoding="utf-8") as f:
                     json.dump(import_info, f, indent=2, ensure_ascii=False)
-                
+
                 print(f"✓ Import information saved to: {output_import_info}")
             except Exception as e:
                 print(f"⚠ Failed to save import information: {e}")
-        
+
         # Always print a summary line for easy parsing (can be parsed by Jenkins)
-        print(f"IMPORT_SUMMARY: {json.dumps({
-            'job_ids': ','.join(job_ids),
-            'collection_name': final_collection_name,
-            'status': 'completed' if import_success else 'failed',
-            'start_time': import_start_time.isoformat(),
-            'end_time': import_end_time.isoformat()
-        })}")
+        summary_data = {
+            "job_ids": ",".join(job_ids),
+            "collection_name": final_collection_name,
+            "status": "completed" if import_success else "failed",
+            "start_time": import_start_time.isoformat(),
+            "end_time": import_end_time.isoformat(),
+        }
+        print(f"IMPORT_SUMMARY: {json.dumps(summary_data)}")
 
     except Exception as e:
         from .rich_display import display_error

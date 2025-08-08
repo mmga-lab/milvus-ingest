@@ -583,6 +583,14 @@ EOF
                         
                         echo "Extended report time range: \${REPORT_START_TIME} to \${REPORT_END_TIME}"
                         
+                        # Get specific pod pattern for this deployment
+                        POD_PATTERN="${env.RELEASE_NAME}.*"
+                        echo "Using pod pattern: \${POD_PATTERN} (namespace: ${env.NAMESPACE})"
+                        
+                        # List actual pods for verification
+                        echo "Deployed pods matching pattern:"
+                        kubectl get pods -n ${env.NAMESPACE} -l app.kubernetes.io/instance=${env.RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
+                        
                         # Generate HTML report
                         HTML_REPORT="${env.REPORT_DIR}/import-performance-report-${env.BUILD_ID}.html"
                         JSON_REPORT="${env.REPORT_DIR}/import-performance-data-${env.BUILD_ID}.json"
@@ -598,6 +606,8 @@ EOF
                             --output "\${HTML_REPORT}" \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
+                            --pod-pattern "\${POD_PATTERN}" \\
+                            --namespace "${env.NAMESPACE}" \\
                             --timeout 60 \\
                             --max-logs 50000 || echo "HTML report generation failed, but continuing..."
                         
@@ -611,6 +621,8 @@ EOF
                             --output "\${JSON_REPORT}" \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
+                            --pod-pattern "\${POD_PATTERN}" \\
+                            --namespace "${env.NAMESPACE}" \\
                             --timeout 60 \\
                             --max-logs 50000 || echo "JSON report generation failed, but continuing..."
                         
@@ -624,6 +636,8 @@ EOF
                             --output "\${CSV_REPORT}" \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
+                            --pod-pattern "\${POD_PATTERN}" \\
+                            --namespace "${env.NAMESPACE}" \\
                             --timeout 60 \\
                             --max-logs 50000 || echo "CSV report generation failed, but continuing..."
                         
