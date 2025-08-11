@@ -181,26 +181,7 @@ pipeline {
                                             string(name: 'prometheus_url', value: params.prometheus_url)
                                         ],
                                         wait: true,
-                                        propagate: false
-                                    
-                                    // Try to copy artifacts from the completed job
-                                    if (params.generate_reports) {
-                                        try {
-                                            copyArtifacts(
-                                                projectName: 'import-stable-test',
-                                                selector: specific("${result.number}"),
-                                                filter: '_artifacts/reports/**/*',
-                                                target: "${env.BATCH_REPORTS_DIR}/${testName}/",
-                                                fingerprintArtifacts: true,
-                                                flatten: false,
-                                                optional: true
-                                            )
-                                            echo "Successfully copied artifacts from ${testName}"
-                                        } catch (Exception e) {
-                                            echo "Failed to copy artifacts from ${testName}: ${e.getMessage()}"
-                                        }
-                                    }
-                                    
+                                        propagate: false                                    
                                     echo "Test ${testName} completed successfully"
                                 } catch (Exception e) {
                                     echo "Test ${testName} failed: ${e.getMessage()}"
