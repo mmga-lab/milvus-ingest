@@ -38,7 +38,7 @@ from .logging_config import (
 from .milvus_inserter import MilvusInserter
 from .models import get_schema_help, validate_schema_data
 from .report.models import ReportConfig
-from .report.report_generator import ReportGenerator
+# CSV report generator removed - using LLMGenerator directly
 from .rich_display import (
     display_error,
     display_schema_details,
@@ -1272,7 +1272,7 @@ def verify_milvus_data(
 
 @main.group()
 def report() -> None:
-    """Generate performance reports from Loki and Prometheus data."""
+    """Generate LLM context documents from Loki and Prometheus data."""
     pass
 
 
@@ -1284,7 +1284,7 @@ def report() -> None:
 @click.option("--start-time", help="Start time (ISO format: 2024-01-01T10:00:00)")
 @click.option("--end-time", help="End time (ISO format: 2024-01-01T11:00:00)")
 @click.option(
-    "--output", "-o", default="/tmp/import_summary.csv", help="Output CSV file"
+    "--output", "-o", default="/tmp/test_context.llm.txt", help="Output file path"
 )
 @click.option("--loki-url", default="http://10.100.36.154:80", help="Loki server URL")
 @click.option(
@@ -1319,7 +1319,7 @@ def generate_report(
     milvus_namespace: Optional[str],
     import_info_file: Optional[str],
 ) -> None:
-    """Generate CSV report for import analysis with Prometheus metrics."""
+    """Generate LLM context document for import analysis."""
     from datetime import datetime, timedelta
 
     # Parse time parameters
@@ -1346,12 +1346,15 @@ def generate_report(
     )
 
     # Generate report
-    click.echo(f"📊 Generating import performance report...")
+    click.echo(f"📊 Generating LLM context document with raw test data...")
     if job_id_list:
         click.echo(f"   Job IDs: {', '.join(job_id_list)}")
 
-    report_gen = ReportGenerator(config)
-    result = report_gen.generate_report(
+    # Use LLMGenerator directly
+    from .report.llm_generator import LLMGenerator
+    
+    llm_gen = LLMGenerator(config)
+    result = llm_gen.generate_llm_context(
         job_ids=job_id_list,
         collection_name=collection_name,
         start_time=start_dt,
@@ -1365,18 +1368,14 @@ def generate_report(
     )
 
     # Display summary
-    click.echo(f"✅ Report saved to: {output}")
+    click.echo(f"✅ LLM context document saved to: {output}")
     click.echo(f"   Jobs analyzed: {result['jobs_analyzed']}")
-    click.echo(f"   Total import time: {result['total_import_time']:.2f} seconds")
-
-    # Show job summaries
-    for job_id, summary in result["job_summaries"].items():
-        click.echo(f"\n   Job {job_id}:")
-        click.echo(f"     Collection: {summary.get('collection_name', 'N/A')}")
-        click.echo(f"     Total time: {summary.get('total_time', 0):.2f}s")
-        if summary.get("phases"):
-            for phase, time in summary["phases"].items():
-                click.echo(f"     {phase}: {time:.2f}s")
+    click.echo(f"   Total log entries collected: {result['total_logs']}")
+    
+    if result['jobs_analyzed'] > 0 and job_id_list:
+        click.echo(f"\nAnalyzed job IDs:")
+        for job_id in job_id_list:
+            click.echo(f"   - {job_id}")
 
 
 @to_milvus.command("import")

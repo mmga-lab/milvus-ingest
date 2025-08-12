@@ -33,6 +33,7 @@ class ReportGenerator:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         output_file: str = "/tmp/import_summary.csv",
+        output_format: str = "csv",
         test_scenario: str | None = None,
         notes: str | None = None,
         release_name: str | None = None,
@@ -46,7 +47,8 @@ class ReportGenerator:
             collection_name: Collection name
             start_time: Start time for analysis
             end_time: End time for analysis
-            output_file: Output CSV file path
+            output_file: Output file path
+            output_format: Output format ('csv' or 'llm')
 
         Returns:
             Dictionary with import summary
@@ -212,18 +214,36 @@ class ReportGenerator:
         if notes:
             import_info["notes"] = notes
 
-        # Generate CSV report
-        self._write_csv_report(job_summaries, import_info, output_file)
+        # Generate report based on format
+        if output_format.lower() == "llm":
+            # Use LLM generator for llm.txt format
+            from .llm_generator import LLMGenerator
+            llm_gen = LLMGenerator(self.config)
+            return llm_gen.generate_llm_context(
+                job_ids=job_ids,
+                collection_name=collection_name,
+                start_time=start_time,
+                end_time=end_time,
+                output_file=output_file,
+                test_scenario=test_scenario,
+                notes=notes,
+                release_name=release_name,
+                milvus_namespace=milvus_namespace,
+                import_info_file=import_info_file,
+            )
+        else:
+            # Default to CSV format
+            self._write_csv_report(job_summaries, import_info, output_file)
 
-        return {
-            "jobs_analyzed": len(job_summaries),
-            "total_import_time": sum(
-                s.get("total_time", 0) for s in job_summaries.values()
-            ),
-            "output_file": output_file,
-            "job_summaries": job_summaries,
-            "import_info": import_info,
-        }
+            return {
+                "jobs_analyzed": len(job_summaries),
+                "total_import_time": sum(
+                    s.get("total_time", 0) for s in job_summaries.values()
+                ),
+                "output_file": output_file,
+                "job_summaries": job_summaries,
+                "import_info": import_info,
+            }
 
     def _summarize_job(self, timing_data: list) -> dict[str, Any]:
         """Summarize timing data for a single job."""
