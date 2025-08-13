@@ -75,7 +75,7 @@ milvus-ingest upload ./data s3://bucket/data/ \
 
 ```bash
 milvus-ingest upload ./data s3://bucket/data/ \
-  --access-key-id AKIAIOSFODNN7EXAMPLE
+  --access-key-id YOUR_ACCESS_KEY_HERE
 ```
 
 ### --secret-access-key SECRET
@@ -146,8 +146,8 @@ milvus-ingest upload ./ecommerce_data s3://my-production-bucket/datasets/ecommer
 
 # 上传到 AWS S3（指定凭证和区域）
 milvus-ingest upload ./ecommerce_data s3://my-production-bucket/datasets/ecommerce/ \
-  --access-key-id AKIAIOSFODNN7EXAMPLE \
-  --secret-access-key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
+  --access-key-id YOUR_ACCESS_KEY_ID \
+  --secret-access-key YOUR_SECRET_ACCESS_KEY \
   --region us-east-1 \
   --storage-class STANDARD
 ```
