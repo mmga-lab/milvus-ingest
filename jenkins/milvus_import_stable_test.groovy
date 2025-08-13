@@ -576,6 +576,14 @@ EOF
             steps {
                 container('main') {
                     script {
+                        // Define report variables at Groovy level
+                        def reportNamespace = params.use_existing_instance ? params.existing_namespace : env.NAMESPACE
+                        def reportReleaseName = params.use_existing_instance ? params.existing_release_name : env.RELEASE_NAME
+                        
+                        echo "Report configuration:"
+                        echo "  Namespace: ${reportNamespace}"
+                        echo "  Release Name: ${reportReleaseName}"
+                        
                         sh """
                         echo "Starting performance report generation"
                         echo "Reading import information from ${env.IMPORT_INFO}"
@@ -585,19 +593,10 @@ EOF
                             exit 0
                         fi
 
-                        # Get deployment-specific parameters
-                        if [ "${params.use_existing_instance}" = "true" ]; then
-                            REPORT_NAMESPACE="${params.existing_namespace}"
-                            REPORT_RELEASE_NAME="${params.existing_release_name}"
-                            echo "Using existing instance: ${params.existing_release_name} in ${params.existing_namespace}"
-                        else
-                            REPORT_NAMESPACE="${env.NAMESPACE}"
-                            REPORT_RELEASE_NAME="${env.RELEASE_NAME}"
-                            echo "Using deployed instance: ${env.RELEASE_NAME} in ${env.NAMESPACE}"
-                        fi
+                        echo "Using instance: ${reportReleaseName} in ${reportNamespace}"
 
                         echo "Pods for the instance:"
-                        kubectl get pods -n \${REPORT_NAMESPACE} -l app.kubernetes.io/instance=\${REPORT_RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
+                        kubectl get pods -n ${reportNamespace} -l app.kubernetes.io/instance=${reportReleaseName} --no-headers -o custom-columns=":metadata.name" || true
 
                         # Generate performance report using import info file
                         RAW_REPORT="${env.REPORT_DIR}/import-performance-raw-${env.BUILD_ID}.json"
@@ -610,8 +609,8 @@ EOF
                             --format raw \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
-                            --release-name "\${REPORT_RELEASE_NAME}" \\
-                            --milvus-namespace "\${REPORT_NAMESPACE}" \\
+                            --release-name "${reportReleaseName}" \\
+                            --milvus-namespace "${reportNamespace}" \\
                             --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
                             --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
                             --timeout 60 || echo "Raw report generation failed, but continuing..."
@@ -670,8 +669,8 @@ EOF
                                     --glm-api-key "\${GLM_API_KEY}" \\
                                     --loki-url "${params.loki_url}" \\
                                     --prometheus-url "${params.prometheus_url}" \\
-                                    --release-name "${REPORT_RELEASE_NAME}" \\
-                                    --milvus-namespace "${REPORT_NAMESPACE}" \\
+                                    --release-name "${reportReleaseName}" \\
+                                    --milvus-namespace "${reportNamespace}" \\
                                     --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
                                     --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
                                     --timeout 60 || {

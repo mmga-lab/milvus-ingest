@@ -48,28 +48,17 @@ class LokiDataCollector:
         start_time = start_time or (datetime.now() - timedelta(hours=1))
         end_time = end_time or datetime.now()
 
-        # Build search patterns for different queries
-        search_patterns = []
-
-        # Primary search patterns based on parameters
-        if job_id and collection_name:
-            search_patterns.extend(
-                [
-                    f'|~ "{job_id}" |~ "{collection_name}"',
-                    f'|~ "{job_id}"',
-                    f'|~ "{collection_name}"',
-                ]
-            )
-        elif job_id:
-            search_patterns.extend([f'|~ "{job_id}"', '|~ "import"'])
-        elif collection_name:
-            search_patterns.extend([f'|~ "{collection_name}"', '|~ "import"'])
-        else:
-            search_patterns.extend(['|~ "import"', '|~ "job"'])
-
-        # Only add jobTimeCost pattern when job_id is present
+        # Build a single search pattern based on parameters
+        # Use the specific pattern you requested: job_id with jobTimeCost
         if job_id:
-            search_patterns.append('|~ "jobTimeCost"')
+            # Primary pattern: search for job_id and jobTimeCost
+            search_patterns = [f'|~ "{job_id}" |~ "jobTimeCost"']
+        elif collection_name:
+            # Fallback: if only collection name is provided
+            search_patterns = [f'|~ "{collection_name}" |~ "import"']
+        else:
+            # General fallback: search for import jobs
+            search_patterns = ['|~ "import" |~ "jobTimeCost"']
 
         raw_logs = {
             "logs": [],

@@ -120,7 +120,8 @@ class ReportConfig(BaseModel):
     def get_pod_pattern(self) -> str:
         """Get pod pattern from release_name."""
         if self.release_name:
-            return f"{self.release_name}-milvus.*"
+            # Use the more specific pattern: release-milvus-mix.*
+            return f"{self.release_name}-milvus-mix.*"
         else:
             return ".*"
 
