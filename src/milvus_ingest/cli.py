@@ -1299,13 +1299,12 @@ def report() -> None:
     default="http://10.100.36.157:9090",
     help="Prometheus server URL",
 )
-@click.option("--pod-pattern", default="import-stable-test-.*", help="Pod name pattern")
 @click.option("--timeout", type=int, default=30, help="Query timeout in seconds")
 @click.option(
     "--test-scenario", help="Test scenario name (e.g., 'Large Parquet Import')"
 )
 @click.option("--notes", help="Additional notes for the test")
-@click.option("--release-name", help="Milvus release name (for Prometheus queries)")
+@click.option("--release-name", help="Milvus release name (derives pod pattern if not specified)")
 @click.option("--milvus-namespace", help="Milvus namespace (for Prometheus queries)")
 @click.option(
     "--import-info-file", help="Path to import_info.json file for additional metadata"
@@ -1327,7 +1326,6 @@ def generate_report(
     format: str,
     loki_url: str,
     prometheus_url: str,
-    pod_pattern: str,
     timeout: int,
     test_scenario: Optional[str],
     notes: Optional[str],
@@ -1363,7 +1361,7 @@ def generate_report(
     config = ReportConfig(
         loki_url=loki_url,
         prometheus_url=prometheus_url,
-        pod_pattern=pod_pattern,
+        release_name=release_name,
         start_time=start_dt,
         end_time=end_dt,
         timeout_seconds=timeout,

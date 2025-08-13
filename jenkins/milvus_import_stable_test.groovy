@@ -175,6 +175,11 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             name: 'prometheus_url',
             defaultValue: 'http://10.100.36.157:9090'
         )
+        string(
+            description: 'GLM API Key for AI-powered analysis (optional - will use Jenkins credential if not provided)',
+            name: 'glm_api_key_override',
+            defaultValue: ''
+        )
     }
 
     environment {
@@ -582,18 +587,16 @@ EOF
 
                         # Get deployment-specific parameters
                         if [ "${params.use_existing_instance}" = "true" ]; then
-                            POD_PATTERN="${params.existing_release_name}.*"
                             REPORT_NAMESPACE="${params.existing_namespace}"
                             REPORT_RELEASE_NAME="${params.existing_release_name}"
                             echo "Using existing instance: ${params.existing_release_name} in ${params.existing_namespace}"
                         else
-                            POD_PATTERN="${env.RELEASE_NAME}.*"
                             REPORT_NAMESPACE="${env.NAMESPACE}"
                             REPORT_RELEASE_NAME="${env.RELEASE_NAME}"
                             echo "Using deployed instance: ${env.RELEASE_NAME} in ${env.NAMESPACE}"
                         fi
 
-                        echo "Pods matching pattern:"
+                        echo "Pods for the instance:"
                         kubectl get pods -n \${REPORT_NAMESPACE} -l app.kubernetes.io/instance=\${REPORT_RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
 
                         # Generate performance report using import info file
@@ -607,7 +610,6 @@ EOF
                             --format raw \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
-                            --pod-pattern "\${POD_PATTERN}" \\
                             --release-name "\${REPORT_RELEASE_NAME}" \\
                             --milvus-namespace "\${REPORT_NAMESPACE}" \\
                             --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
@@ -616,37 +618,79 @@ EOF
 
                         """
 
-                        // Generate GLM analysis report using default credential ID
+                        // Generate GLM analysis report using credential ID or parameter override
                         script {
-                            try {
-                                echo "Attempting to generate GLM analysis report..."
-                                withCredentials([string(credentialsId: 'glm-api-key', variable: 'GLM_API_KEY')]) {
-                                    sh """
-                                    ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
-
-                                    pdm run milvus-ingest report generate \\
-                                        --import-info-file "${env.IMPORT_INFO}" \\
-                                        --output "\${ANALYSIS_REPORT}" \\
-                                        --format analysis \\
-                                        --glm-api-key "\${GLM_API_KEY}" \\
-                                        --loki-url "${params.loki_url}" \\
-                                        --prometheus-url "${params.prometheus_url}" \\
-                                        --pod-pattern "${POD_PATTERN}" \\
-                                        --release-name "${REPORT_RELEASE_NAME}" \\
-                                        --milvus-namespace "${REPORT_NAMESPACE}" \\
-                                        --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
-                                        --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
-                                        --timeout 60 || {
-                                            echo "GLM analysis report generation failed - API error or invalid key"
-                                            echo "Note: GLM analysis failed - only raw data report available" > "\${ANALYSIS_REPORT}"
+                            def glmKeyFound = false
+                            def glmKeyValue = ""
+                            
+                            // Priority 1: Check for parameter override
+                            if (params.glm_api_key_override && params.glm_api_key_override.trim()) {
+                                echo "Using GLM API key from parameter override"
+                                glmKeyValue = params.glm_api_key_override
+                                glmKeyFound = true
+                            }
+                            
+                            // Priority 2: Try to get the GLM API key from Jenkins credentials
+                            if (!glmKeyFound) {
+                                try {
+                                    echo "Attempting to retrieve GLM API key from Jenkins credentials..."
+                                    withCredentials([string(credentialsId: 'glm-api-key', variable: 'GLM_API_KEY')]) {
+                                        glmKeyValue = env.GLM_API_KEY
+                                        if (glmKeyValue && glmKeyValue.trim()) {
+                                            glmKeyFound = true
+                                            echo "✓ GLM API key successfully retrieved from Jenkins credentials"
+                                        } else {
+                                            echo "⚠ GLM API key credential exists but is empty"
                                         }
-                                    """
+                                    }
+                                } catch (Exception credEx) {
+                                    echo "⚠ Failed to retrieve GLM API key from Jenkins credentials: ${credEx.message}"
+                                    echo "Credential ID 'glm-api-key' may not exist or may not be accessible in this context"
                                 }
-                            } catch (Exception e) {
-                                echo "GLM API key credential 'glm-api-key' not found, skipping AI-powered analysis report"
+                            }
+                            
+                            // Priority 3: Check environment variable as fallback
+                            if (!glmKeyFound && env.GLM_API_KEY) {
+                                echo "Using GLM API key from environment variable"
+                                glmKeyValue = env.GLM_API_KEY
+                                glmKeyFound = true
+                            }
+                            
+                            // Generate the analysis report if we have a key
+                            if (glmKeyFound) {
+                                sh """
+                                export GLM_API_KEY="${glmKeyValue}"
+                                ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
+                                
+                                echo "Generating GLM-powered analysis report..."
+                                pdm run milvus-ingest report generate \\
+                                    --import-info-file "${env.IMPORT_INFO}" \\
+                                    --output "\${ANALYSIS_REPORT}" \\
+                                    --format analysis \\
+                                    --glm-api-key "\${GLM_API_KEY}" \\
+                                    --loki-url "${params.loki_url}" \\
+                                    --prometheus-url "${params.prometheus_url}" \\
+                                    --release-name "${REPORT_RELEASE_NAME}" \\
+                                    --milvus-namespace "${REPORT_NAMESPACE}" \\
+                                    --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
+                                    --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
+                                    --timeout 60 || {
+                                        echo "⚠ GLM analysis report generation failed - API error or invalid key"
+                                        echo "Note: GLM analysis failed - only raw data report available" > "\${ANALYSIS_REPORT}"
+                                    }
+                                """
+                            } else {
+                                echo "⚠ GLM API key not available - generating fallback report"
                                 sh """
                                 ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
-                                echo "Note: GLM API key credential not configured - only raw data report generated" > "\${ANALYSIS_REPORT}"
+                                echo "# Performance Analysis Report" > "\${ANALYSIS_REPORT}"
+                                echo "" >> "\${ANALYSIS_REPORT}"
+                                echo "Note: GLM API key not configured - AI-powered analysis is not available." >> "\${ANALYSIS_REPORT}"
+                                echo "Only raw performance data has been collected. To enable intelligent analysis:" >> "\${ANALYSIS_REPORT}"
+                                echo "1. Ensure 'glm-api-key' credential is configured in Jenkins as a 'Secret text' type" >> "\${ANALYSIS_REPORT}"
+                                echo "2. Or set GLM_API_KEY as an environment variable" >> "\${ANALYSIS_REPORT}"
+                                echo "" >> "\${ANALYSIS_REPORT}"
+                                echo "See the raw data report (import-performance-raw-${env.BUILD_ID}.json) for metrics." >> "\${ANALYSIS_REPORT}"
                                 """
                             }
                         }

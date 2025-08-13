@@ -113,9 +113,16 @@ class ReportConfig(BaseModel):
 
     # Query parameters
     job_id_pattern: str | None = None
-    pod_pattern: str = ".*"
+    release_name: str | None = None  # Helm release name to derive pod pattern
     collection_name: str | None = None
     namespace: str = "chaos-testing"  # Kubernetes namespace for log queries
+    
+    def get_pod_pattern(self) -> str:
+        """Get pod pattern from release_name."""
+        if self.release_name:
+            return f"{self.release_name}-milvus.*"
+        else:
+            return ".*"
 
     # Deployment mode (cluster, standalone, or auto-detect)
     deployment_mode: str = "auto"  # "auto", "cluster", or "standalone"

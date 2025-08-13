@@ -67,17 +67,9 @@ class LokiDataCollector:
         else:
             search_patterns.extend(['|~ "import"', '|~ "job"'])
 
-        # Common import-related patterns
-        search_patterns.extend(
-            [
-                '|~ "jobTimeCost"',
-                '|~ "time cost"',
-                '|~ "import job"',
-                '|~ "completed"',
-                '|~ "failed"',
-                '|~ "error"',
-            ]
-        )
+        # Only add jobTimeCost pattern when job_id is present
+        if job_id:
+            search_patterns.append('|~ "jobTimeCost"')
 
         raw_logs = {
             "logs": [],
@@ -96,7 +88,7 @@ class LokiDataCollector:
         # Execute queries for different search patterns
         for i, pattern in enumerate(search_patterns):
             try:
-                base_query = f'{{namespace="{self.config.namespace}", pod=~"{self.config.pod_pattern}"}}'
+                base_query = f'{{namespace="{self.config.namespace}", pod=~"{self.config.get_pod_pattern()}"}}'
                 query = f"{base_query} {pattern}"
 
                 self.logger.debug(
