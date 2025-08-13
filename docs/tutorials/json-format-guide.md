@@ -28,7 +28,7 @@ milvus-ingest 支持两种数据格式：
   },
   {
     "id": 2,
-    "name": "Product 2", 
+    "name": "Product 2",
     "price": 29.99,
     "embedding": [0.5, 0.6, 0.7, 0.8],
     "$meta": {
@@ -114,7 +114,7 @@ milvus-ingest to-milvus import \
     },
     {
       "name": "rating",
-      "type": "Float", 
+      "type": "Float",
       "probability": 0.7,
       "min": 1.0,
       "max": 5.0

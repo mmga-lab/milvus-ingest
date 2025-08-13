@@ -16,7 +16,7 @@ milvus-ingest clean [OPTIONS]
 1. **生成的数据文件**
    - 当前目录下所有生成的数据目录
    - 临时文件和中间文件
-   
+
 2. **工作缓存**
    - 生成过程中的临时缓存
    - 性能分析文件（如果存在）
@@ -99,7 +99,7 @@ milvus-ingest clean
 
 数据目录:
 ├── ./simple_data/          (45.2 MB, 3 个文件)
-├── ./ecommerce_data/       (156.7 MB, 5 个文件)  
+├── ./ecommerce_data/       (156.7 MB, 5 个文件)
 └── ./test_output/          (12.3 MB, 2 个文件)
 
 临时文件:
@@ -199,18 +199,18 @@ milvus-ingest clean --yes
 function run_experiment() {
     local schema=$1
     local rows=$2
-    
+
     echo "开始实验: $schema"
-    
+
     # 生成数据
     milvus-ingest generate --builtin $schema --total-rows $rows --out ./exp_${schema}
-    
+
     # 测试导入
     milvus-ingest to-milvus insert ./exp_${schema} --collection-name test_${schema}
-    
+
     # 清理数据
     milvus-ingest clean --target ./exp_${schema} --yes
-    
+
     echo "实验完成: $schema"
 }
 

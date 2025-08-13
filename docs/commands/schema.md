@@ -43,7 +43,7 @@ milvus-ingest schema list
 ```
 内置模式 (Built-in Schemas):
 ├── simple              基础示例模式
-├── ecommerce           电商产品目录  
+├── ecommerce           电商产品目录
 ├── documents           文档搜索模式
 ├── images              图像库模式
 ├── users               用户档案模式
@@ -77,7 +77,7 @@ milvus-ingest schema list --verbose
 │  向量维度: 128
 │  标签: [基础, 示例, 测试]
 
-┌─ ecommerce  
+┌─ ecommerce
 │  描述: 电商产品目录，适用于商品搜索和推荐
 │  字段: 8个 (自增主键, 产品信息, 价格, 评分, 向量)
 │  向量维度: 768 (搜索) + 512 (图像)
@@ -157,7 +157,7 @@ milvus-ingest schema show ecommerce --format json
       "auto_id": true
     },
     {
-      "name": "product_name", 
+      "name": "product_name",
       "type": "VarChar",
       "max_length": 300
     }
@@ -235,7 +235,7 @@ milvus-ingest generate --builtin test_schema --total-rows 10 --preview
   "fields": [
     {
       "name": "id",
-      "type": "Int64", 
+      "type": "Int64",
       "is_primary": true,
       "auto_id": true
     },
@@ -358,7 +358,7 @@ milvus-ingest schema help --format detailed
 # 向量字段帮助
 milvus-ingest schema help --field-type FloatVector
 
-# 数组字段帮助  
+# 数组字段帮助
 milvus-ingest schema help --field-type Array
 ```
 
@@ -388,13 +388,13 @@ cat > my_schema.json << EOF
   "collection_name": "my_collection",
   "fields": [
     {
-      "name": "id", 
+      "name": "id",
       "type": "Int64",
       "is_primary": true
     },
     {
       "name": "title",
-      "type": "VarChar", 
+      "type": "VarChar",
       "max_length": 500
     },
     {
@@ -460,7 +460,7 @@ milvus-ingest schema remove temp_test --yes
 ```bash
 # 推荐的模式命名
 my_ecommerce    # 业务领域前缀
-test_vectors    # 用途前缀  
+test_vectors    # 用途前缀
 v2_products     # 版本前缀
 ```
 
@@ -477,7 +477,7 @@ milvus-ingest schema add products_v2 schema_v2.json
 ```bash
 # 标准测试流程
 1. 模式验证: schema help
-2. 添加模式: schema add  
+2. 添加模式: schema add
 3. 查看结构: schema show
 4. 预览数据: generate --preview
 5. 小规模测试: generate --total-rows 1000

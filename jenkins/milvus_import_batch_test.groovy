@@ -77,20 +77,20 @@ pipeline {
             defaultValue: 'http://10.100.36.157:9090'
         )
     }
-    
+
     environment {
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
         NAMESPACE = "chaos-testing"
         BATCH_REPORTS_DIR = "${env.WORKSPACE}/_batch_reports"
     }
-    
+
     stages {
         stage('Execute Test Scenarios') {
             steps {
                 script {
                     // Define all test scenarios
                     def allScenarios = []
-                    
+
                     // Schema types to test - comprehensive coverage of all available schemas
                     def schemaTypes = [
                         // 'product_catalog',    // Simple product catalog with auto_id (4 fields, 128d)
@@ -100,7 +100,7 @@ pipeline {
                         'multi_tenant_data',  // Multi-tenant customer support system with partitioning (5 fields, 256d)
                         // 'multimedia_content'  // Multimedia content with multiple vector types and nullable fields (7 fields, 256d+384d+128d)
                     ]
-                    
+
                     // File configurations - optimized for comprehensive testing without 10*10GB
                     def fileConfigs = []
                     if (params.run_large_files) {
@@ -109,7 +109,7 @@ pipeline {
                     if (params.run_small_files) {
                         fileConfigs.add([count: 100, size: '100MB', desc: 'Small Files'])
                     }
-                    
+
                     // Formats
                     def formats = []
                     if (params.test_parquet) {
@@ -118,7 +118,7 @@ pipeline {
                     if (params.test_json) {
                         formats.add('json')
                     }
-                    
+
                     // Storage versions
                     def storageVersions = []
                     if (params.test_storage_v1) {
@@ -127,7 +127,7 @@ pipeline {
                     if (params.test_storage_v2) {
                         storageVersions.add('V2')
                     }
-                    
+
                     // Build test matrix
                     schemaTypes.each { schema ->
                         fileConfigs.each { fileConfig ->
@@ -147,24 +147,24 @@ pipeline {
                             }
                         }
                     }
-                    
+
                     echo "Total test scenarios: ${allScenarios.size()}"
                     currentBuild.description = "Running ${allScenarios.size()} test scenarios"
                     env.TOTAL_SCENARIOS = allScenarios.size().toString()
-                    
+
                     // Now execute the tests
                     def parallelTests = [:]
-                    
+
                     allScenarios.eachWithIndex { scenario, index ->
                         def testName = "Test-${index + 1}: ${scenario.schema}-${scenario.fileDesc}-${scenario.format}-${scenario.storage}"
-                        
+
                         parallelTests[testName] = {
                             stage(testName) {
                                 echo "Starting test: ${testName}"
                                 echo "Configuration: schema=${scenario.schema}, files=${scenario.fileCount}x${scenario.fileSize}, format=${scenario.format}, storage=${scenario.storage}"
-                                
+
                                 try {
-                                    def result = build job: 'import-stable-test', 
+                                    def result = build job: 'import-stable-test',
                                         parameters: [
                                             string(name: 'image_repository', value: params.image_repository),
                                             string(name: 'image_tag', value: params.image_tag),
@@ -182,7 +182,7 @@ pipeline {
                                             string(name: 'prometheus_url', value: params.prometheus_url)
                                         ],
                                         wait: true,
-                                        propagate: false                                    
+                                        propagate: false
                                     echo "Test ${testName} completed successfully"
                                 } catch (Exception e) {
                                     echo "Test ${testName} failed: ${e.getMessage()}"
@@ -191,7 +191,7 @@ pipeline {
                             }
                         }
                     }
-                    
+
                     // Execute tests in batches to avoid overwhelming the system
                     def batchSize = 4  // Run 4 tests in parallel
                     def batches = []
@@ -201,7 +201,7 @@ pipeline {
                         }
                         batches[-1][name] = test
                     }
-                    
+
                     batches.eachWithIndex { batch, batchIndex ->
                         stage("Batch ${batchIndex + 1}") {
                             parallel batch
@@ -211,7 +211,7 @@ pipeline {
             }
         }
     }
-    
+
     post {
         always {
             echo 'Batch test pipeline completed'

@@ -38,6 +38,7 @@ from .logging_config import (
 from .milvus_inserter import MilvusInserter
 from .models import get_schema_help, validate_schema_data
 from .report.models import ReportConfig
+
 # CSV report generator removed - using LLMGenerator directly
 from .rich_display import (
     display_error,
@@ -1290,7 +1291,7 @@ def report() -> None:
     "--format",
     default="analysis",
     type=click.Choice(["analysis", "raw"]),
-    help="Output format: analysis (GLM-powered) or raw (data only)"
+    help="Output format: analysis (GLM-powered) or raw (data only)",
 )
 @click.option("--loki-url", default="http://10.100.36.154:80", help="Loki server URL")
 @click.option(
@@ -1310,14 +1311,12 @@ def report() -> None:
     "--import-info-file", help="Path to import_info.json file for additional metadata"
 )
 @click.option(
-    "--glm-api-key", 
+    "--glm-api-key",
     envvar="GLM_API_KEY",
-    help="GLM API key for analysis (or set GLM_API_KEY env var)"
+    help="GLM API key for analysis (or set GLM_API_KEY env var)",
 )
 @click.option(
-    "--glm-model",
-    default="glm-4-flash",
-    help="GLM model to use (default: glm-4-flash)"
+    "--glm-model", default="glm-4-flash", help="GLM model to use (default: glm-4-flash)"
 )
 def generate_report(
     job_ids: tuple,
@@ -1340,7 +1339,6 @@ def generate_report(
 ) -> None:
     """Generate import performance report with GLM analysis or raw data export."""
     from datetime import datetime, timedelta
-    from .report.models import ReportConfig
 
     # Parse time parameters
     end_dt = datetime.fromisoformat(end_time) if end_time else datetime.now()
@@ -1355,7 +1353,9 @@ def generate_report(
 
     # Check GLM API key for analysis format
     if format == "analysis" and not glm_api_key:
-        click.echo("❌ GLM API key required for analysis format. Set GLM_API_KEY environment variable or use --glm-api-key option.")
+        click.echo(
+            "❌ GLM API key required for analysis format. Set GLM_API_KEY environment variable or use --glm-api-key option."
+        )
         click.echo("💡 Use --format raw to export raw data without analysis.")
         raise click.Abort()
 
@@ -1372,19 +1372,19 @@ def generate_report(
 
     # Display generation message
     if format == "analysis":
-        click.echo(f"🤖 Generating GLM-powered analysis report...")
+        click.echo("🤖 Generating GLM-powered analysis report...")
         click.echo(f"   Model: {glm_model}")
     else:
-        click.echo(f"📊 Generating raw data export...")
-    
+        click.echo("📊 Generating raw data export...")
+
     if job_id_list:
         click.echo(f"   Job IDs: {', '.join(job_id_list)}")
 
     # Use ReportGenerator
     from .report.report_generator import ReportGenerator
-    
+
     generator = ReportGenerator(config)
-    
+
     try:
         result = generator.generate_report(
             job_ids=job_id_list,
@@ -1405,16 +1405,16 @@ def generate_report(
         # Display success message
         if format == "analysis":
             click.echo(f"✅ Analysis report saved to: {output}")
-            if 'glm_model' in result:
+            if "glm_model" in result:
                 click.echo(f"   GLM model used: {result['glm_model']}")
         else:
             click.echo(f"✅ Raw data exported to: {output}")
-        
+
         click.echo(f"   Jobs analyzed: {result['jobs_analyzed']}")
         click.echo(f"   Total log entries: {result['total_logs']}")
-        
-        if result['jobs_analyzed'] > 0 and job_id_list:
-            click.echo(f"\n📋 Analyzed job IDs:")
+
+        if result["jobs_analyzed"] > 0 and job_id_list:
+            click.echo("\n📋 Analyzed job IDs:")
             for job_id in job_id_list:
                 click.echo(f"   - {job_id}")
 

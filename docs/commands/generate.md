@@ -17,7 +17,7 @@ milvus-ingest generate [OPTIONS]
 # 使用内置模式
 milvus-ingest generate --builtin product_catalog --total-rows 1000
 
-# 使用自定义管理模式  
+# 使用自定义管理模式
 milvus-ingest generate --builtin my_products --total-rows 1000
 ```
 
@@ -53,7 +53,7 @@ milvus-ingest generate --builtin ecommerce_search --total-rows 100000
 milvus-ingest generate --builtin ecommerce_search --total-rows 5000000
 ```
 
-### --out DIRECTORY  
+### --out DIRECTORY
 指定输出目录 (默认: 基于模式名称)
 
 ```bash
@@ -121,7 +121,7 @@ milvus-ingest generate --builtin ecommerce --total-rows 10000000 --batch-size 20
 **批处理大小选择指南:**
 - **小型数据集** (<10K 行): 使用默认值
 - **中型数据集** (10K-100K 行): 25000-50000
-- **大型数据集** (100K-1M 行): 50000-100000  
+- **大型数据集** (100K-1M 行): 50000-100000
 - **超大数据集** (>1M 行): 100000-200000
 
 ### --file-size TEXT
@@ -135,7 +135,7 @@ milvus-ingest generate --builtin ecommerce --total-rows 1000000 --file-size 128M
 milvus-ingest generate --builtin ecommerce --total-rows 5000000 --file-size 512MB
 ```
 
-### --rows-per-file INTEGER  
+### --rows-per-file INTEGER
 设置单文件最大行数 (默认: 1000000)
 
 ```bash

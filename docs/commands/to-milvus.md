@@ -192,7 +192,7 @@ S3 服务端点（MinIO 或其他 S3 兼容服务）
 # MinIO 本地部署
 --endpoint-url http://localhost:9000
 
-# MinIO 远程部署  
+# MinIO 远程部署
 --endpoint-url http://minio.company.com:9000
 
 # AWS S3 (可选，不指定则使用默认)
@@ -662,7 +662,7 @@ milvus-ingest to-milvus insert ./test_data
 # 快速验证（推荐作为第一步）
 milvus-ingest to-milvus verify ./test_data --level count
 
-# 详细验证（推荐作为第二步）  
+# 详细验证（推荐作为第二步）
 milvus-ingest to-milvus verify ./test_data --level scalar
 
 # 完整验证（可选，最全面）
@@ -804,7 +804,7 @@ sleep 60 && milvus-ingest to-milvus verify ./data --level count
 echo "第1步: 快速验证"
 milvus-ingest to-milvus verify ./data --level count
 
-echo "第2步: 业务验证"  
+echo "第2步: 业务验证"
 milvus-ingest to-milvus verify ./data --level scalar
 
 echo "第3步: 完整验证（可选）"

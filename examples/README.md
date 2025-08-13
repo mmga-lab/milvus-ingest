@@ -31,7 +31,7 @@ milvus-ingest generate --schema examples/schemas/performance_test.json --validat
 - [用户行为分析](user-behavior.md) - 用户购买偏好向量化分析
 - [个性化推荐](personalized-recommendations.md) - 用户画像与商品匹配
 
-### 📚 知识管理系统  
+### 📚 知识管理系统
 - [文档语义搜索](document-search.md) - 企业知识库智能检索
 - [FAQ 智能问答](faq-chatbot.md) - 客服机器人知识库
 - [代码搜索引擎](code-search.md) - 代码片段语义检索
@@ -76,7 +76,7 @@ milvus-ingest generate --builtin ai_conversations --rows 20000 --out ./ai_demo
 每个场景都包含：
 
 - **业务背景** - 实际应用场景描述
-- **数据模式** - 针对场景优化的数据结构  
+- **数据模式** - 针对场景优化的数据结构
 - **生成命令** - 具体的数据生成步骤
 - **导入配置** - Milvus 集合配置
 - **查询示例** - 典型的搜索和分析查询
@@ -111,7 +111,7 @@ milvus-ingest generate --builtin users --rows 20000 --out ./user_test
 
 **适用场景:**
 - 功能开发
-- 集成测试  
+- 集成测试
 - 性能初步评估
 - 用户体验测试
 
@@ -166,7 +166,7 @@ milvus-ingest generate --builtin face_recognition --rows 50000  # 512维人脸�
 平衡表达能力和性能：
 
 ```bash
-# 中等维度应用  
+# 中等维度应用
 milvus-ingest generate --builtin ecommerce --rows 100000  # 多个256-512维向量
 milvus-ingest generate --builtin images --rows 50000     # 512维图像特征
 ```
@@ -220,7 +220,7 @@ milvus-ingest generate --builtin documents --rows 30000 --out ./docs_collection
 
 # 分别导入
 milvus-ingest to-milvus insert ./users_collection --collection-name users
-milvus-ingest to-milvus insert ./products_collection --collection-name products  
+milvus-ingest to-milvus insert ./products_collection --collection-name products
 milvus-ingest to-milvus insert ./docs_collection --collection-name documents
 ```
 
@@ -256,7 +256,7 @@ graph TD
     B -->|文本文档| D[文档搜索]
     B -->|图像视频| E[多媒体检索]
     B -->|对话交互| F[AI对话]
-    
+
     C --> G[选择ecommerce模式]
     D --> H[选择documents模式]
     E --> I[选择images/videos模式]
@@ -266,7 +266,7 @@ graph TD
 ### 2. 规模规划原则
 
 - **从小开始**: 先用小规模数据验证概念
-- **逐步扩大**: 确认可行后再增加数据规模  
+- **逐步扩大**: 确认可行后再增加数据规模
 - **性能监控**: 每个阶段都要测试性能指标
 - **容量预留**: 生产环境预留30-50%容量余量
 

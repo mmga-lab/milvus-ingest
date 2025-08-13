@@ -6,7 +6,7 @@ This directory contains Jenkins pipeline configurations for comprehensive Milvus
 
 The Jenkins test suite provides:
 - **Comprehensive Schema Testing**: 10 built-in schemas covering all Milvus field types and advanced features
-- **Scale Testing**: Support for both large files (10×10GB) and small files (500×200MB) scenarios  
+- **Scale Testing**: Support for both large files (10×10GB) and small files (500×200MB) scenarios
 - **Format Support**: JSON and Parquet format testing with identical functionality
 - **Storage Validation**: Tests both Storage V1 and V2 architectures
 - **Multi-tenant Testing**: Up to 1024 partitions and 16 VChannels for distributed scenarios
@@ -54,7 +54,7 @@ The test supports these comprehensive built-in schemas for different testing sce
 
 ### Advanced Testing Schemas (Primary Focus)
 - `text_search_advanced` - **17 fields**, BM25 functions, all data types, **768d vectors**
-- `full_text_search` - **11 fields**, BM25 + semantic search, nullable fields, **768d vectors**  
+- `full_text_search` - **11 fields**, BM25 + semantic search, nullable fields, **768d vectors**
 - `default_values` - **9 fields**, default_value parameters, missing data handling, **768d vectors**
 - `dynamic_fields` - **4 fields**, dynamic field capabilities, schema evolution, **384d vectors**
 
@@ -73,7 +73,7 @@ The test supports these comprehensive built-in schemas for different testing sce
 - **Purpose**: Test large-scale data import performance
 - **Formats**: Both JSON and Parquet
 
-### Small File Import Testing  
+### Small File Import Testing
 - **Configuration**: 500 files × 200MB each
 - **Purpose**: Test many-file import scenarios
 - **Formats**: Both JSON and Parquet
@@ -89,7 +89,7 @@ The test supports these comprehensive built-in schemas for different testing sce
 ## Message Queue Configuration
 
 All cluster values files are pre-configured with:
-- **Kafka**: Enabled (reliable message queue for import workloads)  
+- **Kafka**: Enabled (reliable message queue for import workloads)
 - **Pulsar/PulsarV3**: Disabled
 - **Cluster mode**: Only cluster deployment is supported (no standalone mode)
 - **Resource allocation**: Optimized for large-scale import testing

@@ -316,7 +316,9 @@ def determine_generation_strategy(
             "batch_size": batch_size,
             "max_parallel_files": max_parallel,
             "memory_profile": memory_profile,
-            "optimization": "memory_aware" if file_size_gb >= 5 else "throughput_optimized",
+            "optimization": "memory_aware"
+            if file_size_gb >= 5
+            else "throughput_optimized",
             "file_size_gb": file_size_gb,
         }
 
@@ -383,7 +385,6 @@ def _find_primary_key_field(fields: list[dict[str, Any]]) -> dict[str, Any] | No
         if field.get("is_primary", False):
             return field
     return None
-
 
 
 def _calculate_partition_id(partition_key_value: Any, num_partitions: int) -> int:
@@ -502,7 +503,9 @@ def adjust_workers_by_strategy(
         )
 
     # Additional memory safety warnings for multiple large files
-    total_memory_estimate_gb = file_size_gb * adjusted_workers * 1.4  # 1.4x for Python overhead
+    total_memory_estimate_gb = (
+        file_size_gb * adjusted_workers * 1.4
+    )  # 1.4x for Python overhead
     if total_memory_estimate_gb > 100:
         logger.warning(
             f"⚠️ High memory usage expected: ~{total_memory_estimate_gb:.0f}GB "
@@ -2197,9 +2200,7 @@ def _optimize_parquet_columns(
         return df, {}
 
     if disable_optimization:
-        logger.debug(
-            "Column optimization disabled - ensuring schema consistency"
-        )
+        logger.debug("Column optimization disabled - ensuring schema consistency")
         return df, {}
 
     optimization_info = {}

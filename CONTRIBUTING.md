@@ -14,7 +14,7 @@ Thank you for your interest in contributing to milvus-ingest! This document prov
    ```bash
    # Install PDM if you haven't already
    pip install pdm
-   
+
    # Install dependencies
    pdm install --dev
    ```
@@ -122,20 +122,20 @@ pdm run mypy src/
 ### Example Code Style
 ```python
 def generate_mock_data(
-    schema_path: str | Path, 
-    rows: int = 1000, 
+    schema_path: str | Path,
+    rows: int = 1000,
     seed: int | None = None
 ) -> pd.DataFrame:
     """Generate mock data according to the schema.
-    
+
     Args:
         schema_path: Path to JSON or YAML schema file.
         rows: Number of rows to generate.
         seed: Optional random seed for reproducibility.
-        
+
     Returns:
         A pandas DataFrame containing mock data.
-        
+
     Raises:
         ValidationError: If schema validation fails.
         FileNotFoundError: If schema file doesn't exist.

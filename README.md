@@ -5,7 +5,7 @@ Ultra-fast data ingestion tool for Milvus vector databases. Built for large-scal
 ## Performance Highlights
 
 - **10,000-100,000+ rows/sec** - Vectorized NumPy operations for maximum speed
-- **Large-scale optimized** - Designed for datasets >100K rows with intelligent batching  
+- **Large-scale optimized** - Designed for datasets >100K rows with intelligent batching
 - **Smart file partitioning** - Automatic splitting (256MB chunks, 1M rows/file)
 - **Memory efficient** - Streaming generation prevents memory exhaustion
 - **Direct PyArrow I/O** - Optimized Parquet writing with Snappy compression
@@ -148,7 +148,7 @@ schema = manager.get_schema("ecommerce_search")  # Built-in
 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
     json.dump(schema, f, indent=2)
     f.flush()
-    
+
     # Generate data (returns dict with DataFrame and metadata)
     result = generate_mock_data(f.name, rows=10000, seed=42, output_format="dict")
     df = result["data"]
@@ -216,45 +216,45 @@ fields:
     type: "Int64"
     is_primary: true
     auto_id: true
-  
+
   # Text fields with constraints
   - name: "title"
     type: "VarChar"
     max_length: 200
-  
+
   - name: "description"
     type: "VarChar"
     max_length: 1000
     nullable: true
-  
+
   # Numeric fields with ranges
   - name: "price"
     type: "Float"
     min: 0.01
     max: 9999.99
-  
+
   - name: "rating"
     type: "Int8"
     min: 1
     max: 5
-  
+
   # Vector for semantic search
   - name: "embedding"
     type: "FloatVector"
     dim: 768
-  
+
   # Array of tags
   - name: "tags"
     type: "Array"
     element_type: "VarChar"
     max_capacity: 10
     max_length: 50
-  
+
   # Structured metadata
   - name: "metadata"
     type: "JSON"
     nullable: true
-  
+
   # Boolean flags
   - name: "in_stock"
     type: "Bool"
@@ -318,7 +318,7 @@ milvus-ingest clean [options]     # Utility commands
 # Quick start with built-in schema (high-performance by default)
 milvus-ingest generate --builtin product_catalog --total-rows 100000 --preview
 
-# Generate massive datasets with automatic file partitioning 
+# Generate massive datasets with automatic file partitioning
 milvus-ingest generate --builtin ecommerce_search --total-rows 5000000 --format parquet --out products/
 
 # Test custom schema validation
@@ -381,7 +381,7 @@ Comprehensive verification system with three progressive levels of validation (a
 milvus-ingest to-milvus verify ./products/                    # Quick verification
 milvus-ingest to-milvus verify ./products/ --level count      # Explicit level
 
-# Level 2: Scalar fields + Query tests (excludes vectors for performance)  
+# Level 2: Scalar fields + Query tests (excludes vectors for performance)
 milvus-ingest to-milvus verify ./products/ --level scalar     # Business data accuracy
 
 # Level 3: All fields + Query tests (includes vectors, most comprehensive)
@@ -398,7 +398,7 @@ milvus-ingest to-milvus verify ./products/ --level full \
 
 **Progressive Verification Levels:**
 - **Level 1 (count)**: Row count verification + 1000-sample query/search tests
-- **Level 2 (scalar)**: + Scalar field value validation (excludes vectors)  
+- **Level 2 (scalar)**: + Scalar field value validation (excludes vectors)
 - **Level 3 (full)**: + Vector field validation (complete data quality assurance)
 
 **Query Correctness Testing:**
@@ -414,7 +414,7 @@ milvus-ingest to-milvus verify ./products/ --level full \
 
 **Rich Output & Reporting:**
 - Detailed field-by-field verification tables with pass/fail status
-- Comprehensive summary reports with verification statistics  
+- Comprehensive summary reports with verification statistics
 - Clear debugging information for failed validations
 - Performance metrics and success rates for query tests
 
@@ -503,7 +503,7 @@ milvus-ingest to-milvus import ecommerce_products \
 # Quick verification (row count + query tests)
 milvus-ingest to-milvus verify ./products/ --level count
 
-# Business data accuracy (scalar fields + query tests)  
+# Business data accuracy (scalar fields + query tests)
 milvus-ingest to-milvus verify ./products/ --level scalar
 
 # Complete validation (all fields + query tests)
@@ -564,7 +564,7 @@ make lint test                   # Run linting and tests together
 ```
 src/milvus_fake_data/
 ├── cli.py              # Click-based CLI interface
-├── generator.py        # Core data generation logic  
+├── generator.py        # Core data generation logic
 ├── optimized_writer.py # High-performance vectorized data generation
 ├── models.py           # Pydantic schema validation models
 ├── schema_manager.py   # Schema management system

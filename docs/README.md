@@ -7,7 +7,7 @@
 ### 核心命令
 
 - [**generate**](commands/generate.md) - 生成模拟数据
-- [**schema**](commands/schema.md) - 模式管理 
+- [**schema**](commands/schema.md) - 模式管理
 - [**upload**](commands/upload.md) - 上传到 S3/MinIO
 - [**to-milvus**](commands/to-milvus.md) - Milvus 集成 (insert/import/verify)
 - [**clean**](commands/clean.md) - 清理生成的文件
@@ -53,7 +53,7 @@ milvus-ingest <COMMAND> [OPTIONS]
 
 主要命令组：
   generate     数据生成
-  schema       模式管理  
+  schema       模式管理
   upload       文件上传
   to-milvus    Milvus 集成
   clean        清理工具
@@ -120,7 +120,7 @@ milvus-ingest generate --builtin my_products --total-rows 10000
 
 ### 标量类型
 - **数值**: Int8, Int16, Int32, Int64, Float, Double, Bool
-- **文本**: VarChar, String (需要 max_length)  
+- **文本**: VarChar, String (需要 max_length)
 - **复杂**: JSON, Array
 
 ### 向量类型

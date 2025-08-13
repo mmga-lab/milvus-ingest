@@ -20,7 +20,7 @@ milvus-ingest upload LOCAL_PATH S3_PATH [OPTIONS]
 ~/generated_data/       # 用户主目录路径
 ```
 
-### S3_PATH  
+### S3_PATH
 S3 目标路径，格式为 `s3://bucket/prefix/`
 
 ```bash
@@ -107,7 +107,7 @@ milvus-ingest upload ./data s3://bucket/data/ \
   --no-verify-ssl
 ```
 
-### --region REGION  
+### --region REGION
 指定 AWS 区域（AWS S3 专用）
 
 ```bash
@@ -124,7 +124,7 @@ milvus-ingest upload ./data s3://my-bucket/data/ \
 milvus-ingest upload ./data s3://bucket/data/ \
   --storage-class STANDARD
 
-# 低频访问存储  
+# 低频访问存储
 milvus-ingest upload ./data s3://bucket/data/ \
   --storage-class STANDARD_IA
 
@@ -234,14 +234,14 @@ $ milvus-ingest upload ./data s3://bucket/data/ --endpoint-url http://minio:9000
 
 上传进度:
 ┌─ data.parquet          ━━━━━━━━━━━━━━━━━━━━ 100% 185.2 MB @ 45.3 MB/s
-├─ meta.json             ━━━━━━━━━━━━━━━━━━━━ 100%   1.2 KB @ 15.8 KB/s  
+├─ meta.json             ━━━━━━━━━━━━━━━━━━━━ 100%   1.2 KB @ 15.8 KB/s
 └─ index_suggestions.json ━━━━━━━━━━━━━━━━━━━━ 100%   2.3 KB @ 18.2 KB/s
 
 [SUCCESS] 成功上传 3 个文件到 s3://bucket/data/
 [INFO] 总用时: 4.2 秒, 平均速度: 58.5 MB/s
 [INFO] 上传的文件:
   - s3://bucket/data/data.parquet
-  - s3://bucket/data/meta.json  
+  - s3://bucket/data/meta.json
   - s3://bucket/data/index_suggestions.json
 ```
 
@@ -370,19 +370,19 @@ ENDPOINT="http://minio:9000"
 
 for schema in "${SCHEMAS[@]}"; do
     echo "处理 $schema..."
-    
+
     # 生成数据
     milvus-ingest generate --builtin $schema --total-rows 100000 --out ./${schema}_data
-    
+
     # 上传数据
     milvus-ingest upload ./${schema}_data ${BUCKET}/${schema}/ \
         --endpoint-url $ENDPOINT \
         --access-key-id $MINIO_ACCESS_KEY \
         --secret-access-key $MINIO_SECRET_KEY
-    
+
     # 清理本地数据
     rm -rf ./${schema}_data
-    
+
     echo "$schema 处理完成"
 done
 ```

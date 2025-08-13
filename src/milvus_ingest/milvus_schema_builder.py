@@ -47,7 +47,7 @@ class MilvusSchemaBuilder:
         for field_info in metadata["schema"]["fields"]:
             field_name = field_info["name"]
             field_type = field_info["type"]
-            
+
             # Log partition key field
             if field_info.get("is_partition_key", False):
                 self.logger.info(f"Setting partition key field: {field_name}")
@@ -268,25 +268,31 @@ class MilvusSchemaBuilder:
                 "schema": schema,
                 "index_params": index_params,
             }
-            
+
             # Add collection configuration parameters if specified
             collection_config = metadata.get("collection_config", {})
-            
+
             # Add num_shards if specified
             if "num_shards" in collection_config:
                 create_params["num_shards"] = collection_config["num_shards"]
-                self.logger.info(f"Creating collection with {collection_config['num_shards']} shards")
-            
+                self.logger.info(
+                    f"Creating collection with {collection_config['num_shards']} shards"
+                )
+
             # Add num_partitions if specified
             if "num_partitions" in collection_config:
                 create_params["num_partitions"] = collection_config["num_partitions"]
-                partition_key_field = collection_config.get("partition_key_field", "unknown")
-                self.logger.info(f"Creating collection with {collection_config['num_partitions']} partitions using key '{partition_key_field}'")
-            
+                partition_key_field = collection_config.get(
+                    "partition_key_field", "unknown"
+                )
+                self.logger.info(
+                    f"Creating collection with {collection_config['num_partitions']} partitions using key '{partition_key_field}'"
+                )
+
             # Create collection
             self.client.create_collection(**create_params)
             self.logger.info(f"Created collection: {collection_name}")
-            
+
             # Print collection details for verification
             self._print_collection_details(collection_name)
             return True
@@ -298,50 +304,60 @@ class MilvusSchemaBuilder:
         try:
             # Get collection description from Milvus
             collection_info = self.client.describe_collection(collection_name)
-            
+
             self.logger.info("=" * 60)
             self.logger.info(f"Milvus Collection Schema: {collection_name}")
             self.logger.info("=" * 60)
-            
+
             # Print the raw collection info as returned by Milvus
             import json
-            
+
             # First log the type of collection_info for debugging
             self.logger.info(f"Collection info type: {type(collection_info)}")
-            
-            if hasattr(collection_info, '__dict__'):
+
+            if hasattr(collection_info, "__dict__"):
                 # Convert object to dict if needed
                 info_dict = vars(collection_info)
-                self.logger.info(f"Collection Description:\n{json.dumps(info_dict, indent=2, default=str)}")
+                self.logger.info(
+                    f"Collection Description:\n{json.dumps(info_dict, indent=2, default=str)}"
+                )
             elif isinstance(collection_info, dict):
-                self.logger.info(f"Collection Description:\n{json.dumps(collection_info, indent=2, default=str)}")
+                self.logger.info(
+                    f"Collection Description:\n{json.dumps(collection_info, indent=2, default=str)}"
+                )
             else:
                 # Try to access attributes directly if it's a Milvus object
                 try:
-                    self.logger.info(f"Collection name: {getattr(collection_info, 'collection_name', 'N/A')}")
-                    self.logger.info(f"Number of shards: {getattr(collection_info, 'num_shards', 'N/A')}")
-                    self.logger.info(f"Number of partitions: {getattr(collection_info, 'num_partitions', 'N/A')}")
-                    
+                    self.logger.info(
+                        f"Collection name: {getattr(collection_info, 'collection_name', 'N/A')}"
+                    )
+                    self.logger.info(
+                        f"Number of shards: {getattr(collection_info, 'num_shards', 'N/A')}"
+                    )
+                    self.logger.info(
+                        f"Number of partitions: {getattr(collection_info, 'num_partitions', 'N/A')}"
+                    )
+
                     # Try to get schema
-                    schema = getattr(collection_info, 'schema', None)
+                    schema = getattr(collection_info, "schema", None)
                     if schema:
-                        fields = getattr(schema, 'fields', [])
+                        fields = getattr(schema, "fields", [])
                         self.logger.info("Fields:")
                         for field in fields:
                             field_info = f"  - {getattr(field, 'name', 'unknown')}: {getattr(field, 'dtype', 'unknown')}"
-                            if getattr(field, 'is_primary', False):
+                            if getattr(field, "is_primary", False):
                                 field_info += " (PRIMARY KEY)"
-                            if getattr(field, 'auto_id', False):
+                            if getattr(field, "auto_id", False):
                                 field_info += " (AUTO_ID)"
-                            if getattr(field, 'is_partition_key', False):
+                            if getattr(field, "is_partition_key", False):
                                 field_info += " (PARTITION KEY)"
                             self.logger.info(field_info)
                 except Exception as e:
                     self.logger.info(f"Collection Description (raw): {collection_info}")
                     self.logger.warning(f"Could not parse collection details: {e}")
-            
+
             self.logger.info("=" * 60)
-            
+
         except Exception as e:
             self.logger.warning(f"Could not retrieve collection details: {e}")
 

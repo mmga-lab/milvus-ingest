@@ -17,7 +17,7 @@
 ### 硬件要求
 **最低配置:**
 - CPU: 4核心
-- 内存: 8GB RAM  
+- 内存: 8GB RAM
 - 存储: 100GB 可用空间
 
 **推荐配置:**
@@ -99,22 +99,22 @@ schema="simple"
 
 for batch_size in "${batch_sizes[@]}"; do
     echo "测试批处理大小: $batch_size"
-    
+
     start_time=$(date +%s.%N)
-    
+
     milvus-ingest generate \
         --builtin $schema \
         --total-rows $rows \
         --batch-size $batch_size \
         --out ./test_batch_${batch_size} \
         --no-progress > /dev/null 2>&1
-    
+
     end_time=$(date +%s.%N)
     duration=$(echo "$end_time - $start_time" | bc)
     speed=$(echo "scale=0; $rows / $duration" | bc)
-    
+
     echo "  用时: ${duration}秒, 速度: ${speed} 行/秒"
-    
+
     # 清理测试数据
     rm -rf ./test_batch_${batch_size}
 done
@@ -130,7 +130,7 @@ chmod +x test_batch_size.sh
 # 内存受限环境 (8GB RAM)
 milvus-ingest generate --batch-size 10000
 
-# 标准环境 (16GB RAM)  
+# 标准环境 (16GB RAM)
 milvus-ingest generate --batch-size 50000
 
 # 高内存环境 (32GB+ RAM)
@@ -147,7 +147,7 @@ milvus-ingest generate --batch-size 100000
 # 快速本地测试 - 小文件
 --file-size 64MB --rows-per-file 100000
 
-# 平衡性能 - 中等文件  
+# 平衡性能 - 中等文件
 --file-size 256MB --rows-per-file 500000
 
 # 最大吞吐量 - 大文件
@@ -354,23 +354,23 @@ from datetime import datetime
 
 def monitor_performance(duration_seconds=300):
     """监控系统性能"""
-    
+
     start_time = time.time()
     metrics = []
-    
+
     print(f"开始性能监控 (持续 {duration_seconds} 秒)...")
     print("时间\t\tCPU%\t内存%\t内存GB\t磁盘IO MB/s")
     print("-" * 60)
-    
+
     while time.time() - start_time < duration_seconds:
         # CPU使用率
         cpu_percent = psutil.cpu_percent(interval=1)
-        
+
         # 内存使用率
         memory = psutil.virtual_memory()
         memory_percent = memory.percent
         memory_gb = memory.used / (1024**3)
-        
+
         # 磁盘IO
         disk_io = psutil.disk_io_counters()
         if hasattr(monitor_performance, 'prev_disk_io'):
@@ -379,13 +379,13 @@ def monitor_performance(duration_seconds=300):
             io_mb = read_mb + write_mb
         else:
             io_mb = 0
-        
+
         monitor_performance.prev_disk_io = disk_io
-        
+
         # 记录指标
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"{timestamp}\t{cpu_percent:5.1f}\t{memory_percent:5.1f}\t{memory_gb:5.1f}\t{io_mb:8.1f}")
-        
+
         metrics.append({
             "timestamp": timestamp,
             "cpu_percent": cpu_percent,
@@ -393,18 +393,18 @@ def monitor_performance(duration_seconds=300):
             "memory_gb": memory_gb,
             "disk_io_mb_s": io_mb
         })
-        
+
         time.sleep(5)
-    
+
     # 保存指标
     with open("performance_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
-    
+
     # 统计摘要
     avg_cpu = sum(m["cpu_percent"] for m in metrics) / len(metrics)
     max_memory = max(m["memory_gb"] for m in metrics)
     avg_io = sum(m["disk_io_mb_s"] for m in metrics) / len(metrics)
-    
+
     print(f"\n性能摘要:")
     print(f"  平均CPU使用: {avg_cpu:.1f}%")
     print(f"  峰值内存使用: {max_memory:.1f}GB")
@@ -452,57 +452,57 @@ import statistics
 
 def analyze_bottleneck(metrics_file="performance_metrics.json"):
     """分析性能瓶颈"""
-    
+
     with open(metrics_file) as f:
         metrics = json.load(f)
-    
+
     if not metrics:
         print("没有找到性能指标数据")
         return
-    
+
     # 计算统计数据
     cpu_values = [m["cpu_percent"] for m in metrics]
     memory_values = [m["memory_percent"] for m in metrics]
     io_values = [m["disk_io_mb_s"] for m in metrics]
-    
+
     avg_cpu = statistics.mean(cpu_values)
     avg_memory = statistics.mean(memory_values)
     avg_io = statistics.mean(io_values)
-    
+
     max_cpu = max(cpu_values)
     max_memory = max(memory_values)
     max_io = max(io_values)
-    
+
     print("🔍 性能瓶颈分析:")
     print(f"  CPU 使用: 平均 {avg_cpu:.1f}%, 峰值 {max_cpu:.1f}%")
     print(f"  内存使用: 平均 {avg_memory:.1f}%, 峰值 {max_memory:.1f}%")
     print(f"  磁盘IO: 平均 {avg_io:.1f}MB/s, 峰值 {max_io:.1f}MB/s")
-    
+
     # 瓶颈判断
     bottlenecks = []
-    
+
     if max_cpu > 90:
         bottlenecks.append("CPU")
         print(f"  ⚠️  CPU瓶颈: 峰值使用率{max_cpu:.1f}%")
         print(f"    建议: 减少batch_size或使用更多CPU核心")
-    
+
     if max_memory > 85:
         bottlenecks.append("Memory")
         print(f"  ⚠️  内存瓶颈: 峰值使用率{max_memory:.1f}%")
         print(f"    建议: 减少batch_size或启用文件分割")
-    
+
     if avg_io > 100:  # MB/s
         bottlenecks.append("Disk I/O")
         print(f"  ⚠️  磁盘IO瓶颈: 平均{avg_io:.1f}MB/s")
         print(f"    建议: 使用SSD或增大文件大小")
-    
+
     if not bottlenecks:
         print("  ✅ 未发现明显瓶颈，性能表现良好")
-        
+
         # 优化建议
         if avg_cpu < 50:
             print(f"  💡 CPU利用率较低({avg_cpu:.1f}%), 可以增加batch_size")
-        
+
         if avg_memory < 50:
             print(f"  💡 内存利用率较低({avg_memory:.1f}%), 可以增加batch_size")
 
@@ -558,7 +558,7 @@ generate_parallel() {
     local total_rows=$1
     local parallel_jobs=$2
     local rows_per_job=$((total_rows / parallel_jobs))
-    
+
     for i in $(seq 0 $((parallel_jobs - 1))); do
         local start_seed=$((42 + i * 1000))
         milvus-ingest generate \
@@ -568,9 +568,9 @@ generate_parallel() {
             --out ./parallel_job_$i \
             --batch-size 50000 &
     done
-    
+
     wait  # 等待所有任务完成
-    
+
     # 合并结果（需要自定义脚本）
     # merge_datasets ./parallel_job_* ./final_dataset
 }

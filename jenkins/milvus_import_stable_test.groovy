@@ -139,7 +139,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
 
 • mc_cli - Use MinIO Client (mc) CLI (Recommended for MinIO)
   - Native MinIO protocol support
-  - Optimal performance for MinIO servers  
+  - Optimal performance for MinIO servers
   - Automatic installation and configuration
   - Best choice for MinIO deployments
 
@@ -176,7 +176,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
             defaultValue: 'http://10.100.36.157:9090'
         )
     }
-    
+
     environment {
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
         RELEASE_NAME = "import-stable-test-${env.BUILD_ID}"
@@ -200,12 +200,12 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         if (!params.existing_namespace || params.existing_namespace.trim().isEmpty()) {
                             error("Existing namespace is required when using existing instance")
                         }
-                        
+
                         echo "Using existing Milvus instance:"
                         echo "  Release Name: ${params.existing_release_name}"
                         echo "  Namespace: ${params.existing_namespace}"
                         echo "  MinIO Bucket: ${params.minio_bucket}"
-                        
+
                         // Verify the existing instance is accessible
                         echo "Verifying existing Milvus instance..."
                         sh """
@@ -224,7 +224,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 }
             }
         }
-        
+
         stage('Install Dependencies') {
             steps {
                 container('main') {
@@ -242,27 +242,27 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         sh """
                         # Set UV cache directory to use NFS mounted path
                         export UV_CACHE_DIR=/tmp/.uv-cache
-                        
+
                         # Install PDM if not available
                         which pdm || pip install pdm
-                        
+
                         # Use Python 3.10 specifically
                         pdm use python3.10
                         pdm config use_uv true
-                        
+
                         # Install milvus-ingest from current workspace
                         # Fix lockfile if needed
                         # pdm lock --update-reuse || true
                         rm -rf pdm.lock
                         pdm install
-                        
+
                         # Verify installation
                         pdm run milvus-ingest --help
                         """
                     }
                 }
             }
-        }        
+        }
 
         stage('Prepare Milvus Values') {
             when {
@@ -274,7 +274,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         sh """
                         # Create working directory for values
                         mkdir -p /tmp/milvus-values
-                        
+
                         # Select appropriate values file based on storage version (cluster mode only)
                         if [ "${params.storage_version}" = "V2" ]; then
                             cp jenkins/values/cluster-storagev2.yaml /tmp/milvus-values/values.yaml
@@ -283,15 +283,15 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             cp jenkins/values/cluster-storagev1.yaml /tmp/milvus-values/values.yaml
                             echo "Using cluster Storage V1 configuration"
                         fi
-                        
+
                         # Customize values based on parameters
                         cd /tmp/milvus-values
-                        
+
                         # Update node replicas
                         yq -i '.queryNode.replicas = "${params.querynode_nums}"' values.yaml
                         yq -i '.dataNode.replicas = "${params.datanode_nums}"' values.yaml
                         yq -i '.proxy.replicas = "${params.proxy_nums}"' values.yaml
-                        
+
                         echo "Final values configuration:"
                         cat values.yaml
                         """
@@ -311,26 +311,26 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 container('main') {
                     script {
                         def image_tag_modified = ''
-                        
+
                         if ("${params.image_tag}" =~ 'latest') {
                             image_tag_modified = sh(returnStdout: true, script: "tagfinder get-tag -t ${params.image_tag}").trim()
                         }
                         else {
                             image_tag_modified = "${params.image_tag}"
                         }
-                        
+
                         sh 'helm repo add milvus https://zilliztech.github.io/milvus-helm'
                         sh 'helm repo update'
-                        
+
                         sh """
                         cd /tmp/milvus-values
-                        
+
                         echo "Deploying Milvus cluster with configuration:"
                         echo "Image Repository: ${params.image_repository}"
                         echo "Image Tag: ${params.image_tag}"
                         echo "Resolved Image Tag: ${image_tag_modified}"
                         echo "Storage Version: ${params.storage_version}"
-                        
+
                         helm install --wait --debug --timeout 600s ${env.RELEASE_NAME} milvus/milvus \\
                             --set image.all.repository=${params.image_repository} \\
                             --set image.all.tag=${image_tag_modified} \\
@@ -342,7 +342,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                         sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                         sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME}"
-                    }   
+                    }
                 }
             }
         }
@@ -364,7 +364,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         echo "Partitions: ${params.partition_count}"
                         echo "Shards: ${params.shard_count}"
                         echo "Output Path: ${outputPath}"
-                        
+
                         # Generate data using milvus-ingest CLI from current workspace
                         pdm run milvus-ingest generate \\
                             --builtin ${params.schema_type} \\
@@ -377,7 +377,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --workers 8 \\
                             --verbose \\
                             --force
-                        
+
                         echo "Data generation completed. Checking output:"
                         ls -lah ${outputPath}/
                         if [ -f "${outputPath}/meta.json" ]; then
@@ -389,7 +389,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                 }
             }
         }
-        
+
         stage('Import to Milvus') {
             options {
                 timeout(time: 240, unit: 'MINUTES')
@@ -403,14 +403,14 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         def minioAccessKey = params.minio_access_key
                         def minioSecretKey = params.minio_secret_key
                         def minioBucket = params.minio_bucket
-                        
+
                         if (params.use_existing_instance) {
                             // Get URIs from existing services using release name and namespace
                             def host = sh(returnStdout: true, script: "kubectl get svc/${params.existing_release_name}-milvus -n ${params.existing_namespace} -o jsonpath=\"{.spec.clusterIP}\"").trim()
                             def minioHost = sh(returnStdout: true, script: "kubectl get svc/${params.existing_release_name}-minio -n ${params.existing_namespace} -o jsonpath=\"{.spec.clusterIP}\"").trim()
                             milvusUri = "http://${host}:19530"
                             minioEndpoint = "http://${minioHost}:9000"
-                            
+
                             if (!milvusUri || !minioEndpoint) {
                                 error("Could not retrieve service IPs from existing instance")
                             }
@@ -421,7 +421,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             milvusUri = "http://${host}:19530"
                             minioEndpoint = "http://${minioHost}:9000"
                         }
-                        
+
                         // Determine upload method flags based on user selection
                         def uploadFlags = ""
                         switch(params.upload_method) {
@@ -436,7 +436,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                                 uploadFlags = ""  // AWS CLI is default, no flag needed
                                 break
                         }
-                        
+
                         sh """
                         echo "Starting bulk import to Milvus:"
                         echo "Milvus URI: ${milvusUri}"
@@ -445,11 +445,11 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                         echo "Data Path: ${outputPath}"
                         echo "Upload Method: ${params.upload_method}"
                         echo "Upload Flags: ${uploadFlags}"
-                        
+
                         # Prepare directories for import info and reports
                         mkdir -p ${env.REPORT_DIR}
                         mkdir -p ${env.ARTIFACTS}
-                        
+
                         # Import data to Milvus via MinIO from current workspace
                         # Use the new --output-import-info option to get structured information
                         pdm run milvus-ingest to-milvus import \\
@@ -465,11 +465,11 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                             --timeout 4800 \\
                             --output-import-info ${env.IMPORT_INFO} \\
                             ${uploadFlags}
-                        
+
                         # Verify the import info file was created and enhance it with Jenkins metadata
                         if [ -f "${env.IMPORT_INFO}" ]; then
                             echo "✓ Import information captured successfully"
-                            
+
                             # Add Jenkins-specific metadata to the import info
                             jq '. + {
                                 "jenkins_job": "${env.JOB_NAME}",
@@ -487,7 +487,7 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
                                     "upload_method": "${params.upload_method}"
                                 }
                             }' ${env.IMPORT_INFO} > ${env.IMPORT_INFO}.tmp && mv ${env.IMPORT_INFO}.tmp ${env.IMPORT_INFO}
-                            
+
                             echo "Enhanced import info with Jenkins metadata:"
                             cat ${env.IMPORT_INFO} | jq .
                         else
@@ -517,14 +517,14 @@ Select based on specific testing requirements (BM25, dynamic fields, multi-vecto
 }
 EOF
                         fi
-                        
+
                         echo "Import completed successfully using ${params.upload_method} method"
                         """
                     }
                 }
             }
         }
-        
+
         stage('Verify Data') {
             options {
                 timeout(time: 60, unit: 'MINUTES')
@@ -534,7 +534,7 @@ EOF
                     script {
                         def outputPath = "/root/milvus_ingest_data/${env.BUILD_ID}"
                         def milvusUri = ""
-                        
+
                         if (params.use_existing_instance) {
                             def host = sh(returnStdout: true, script: "kubectl get svc/${params.existing_release_name}-milvus -n ${params.existing_namespace} -o jsonpath=\"{.spec.clusterIP}\"").trim()
                             milvusUri = "http://${host}:19530"
@@ -542,25 +542,25 @@ EOF
                             def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
                             milvusUri = "http://${host}:19530"
                         }
-                        
+
                         sh """
                         echo "Starting data verification:"
                         echo "Milvus URI: ${milvusUri}"
                         echo "Data Path: ${outputPath}"
-                        
+
                         # Verify imported data from current workspace
                         pdm run milvus-ingest to-milvus verify \\
                             ${outputPath} \\
                             --uri ${milvusUri} \\
                             --level full
-                        
+
                         echo "Verification completed successfully"
                         """
                     }
                 }
             }
         }
-        
+
         stage('Generate Performance Report') {
             when {
                 expression { params.generate_report == true }
@@ -574,12 +574,12 @@ EOF
                         sh """
                         echo "Starting performance report generation"
                         echo "Reading import information from ${env.IMPORT_INFO}"
-                        
+
                         if [ ! -f "${env.IMPORT_INFO}" ]; then
                             echo "Warning: Import info file not found. Cannot generate detailed report."
                             exit 0
                         fi
-                        
+
                         # Get deployment-specific parameters
                         if [ "${params.use_existing_instance}" = "true" ]; then
                             POD_PATTERN="${params.existing_release_name}.*"
@@ -592,14 +592,14 @@ EOF
                             REPORT_RELEASE_NAME="${env.RELEASE_NAME}"
                             echo "Using deployed instance: ${env.RELEASE_NAME} in ${env.NAMESPACE}"
                         fi
-                        
+
                         echo "Pods matching pattern:"
                         kubectl get pods -n \${REPORT_NAMESPACE} -l app.kubernetes.io/instance=\${REPORT_RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
-                        
+
                         # Generate performance report using import info file
                         RAW_REPORT="${env.REPORT_DIR}/import-performance-raw-${env.BUILD_ID}.json"
                         ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
-                        
+
                         echo "Generating raw performance data using import info file..."
                         pdm run milvus-ingest report generate \\
                             --import-info-file "${env.IMPORT_INFO}" \\
@@ -613,9 +613,9 @@ EOF
                             --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
                             --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
                             --timeout 60 || echo "Raw report generation failed, but continuing..."
-                        
+
                         """
-                        
+
                         // Generate GLM analysis report using default credential ID
                         script {
                             try {
@@ -623,7 +623,7 @@ EOF
                                 withCredentials([string(credentialsId: 'glm-api-key', variable: 'GLM_API_KEY')]) {
                                     sh """
                                     ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
-                                    
+
                                     pdm run milvus-ingest report generate \\
                                         --import-info-file "${env.IMPORT_INFO}" \\
                                         --output "\${ANALYSIS_REPORT}" \\
@@ -650,17 +650,17 @@ EOF
                                 """
                             }
                         }
-                        
+
                         sh """
                         # Copy reports to Jenkins artifacts directory
                         RAW_REPORT="${env.REPORT_DIR}/import-performance-raw-${env.BUILD_ID}.json"
                         ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
-                        
+
                         mkdir -p ${env.ARTIFACTS}/reports
                         cp -f ${env.IMPORT_INFO} ${env.ARTIFACTS}/import_info.json || true
                         cp -f "\${RAW_REPORT}" ${env.ARTIFACTS}/reports/ || true
                         cp -f "\${ANALYSIS_REPORT}" ${env.ARTIFACTS}/reports/ || true
-                        
+
                         # Generate a summary report for easy consumption
                         cat > ${env.ARTIFACTS}/reports/report_summary.txt << EOF
 Performance Report Summary
@@ -668,7 +668,7 @@ Performance Report Summary
 
 Build Information:
 - Jenkins Job: ${env.JOB_NAME}
-- Build Number: ${env.BUILD_NUMBER}  
+- Build Number: ${env.BUILD_NUMBER}
 - Build ID: ${env.BUILD_ID}
 - Build URL: ${env.BUILD_URL}
 
@@ -693,7 +693,7 @@ Data Sources:
 
 Generated at: \$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 EOF
-                        
+
                         echo "Performance reports generated successfully!"
                         echo "Report files:"
                         ls -la ${env.ARTIFACTS}/reports/
@@ -712,10 +712,10 @@ EOF
                     // Collect logs from the appropriate instance
                     def logReleaseName = params.use_existing_instance ? params.existing_release_name : env.RELEASE_NAME
                     def logNamespace = params.use_existing_instance ? params.existing_namespace : env.NAMESPACE
-                    
+
                     echo "Collecting logs from release: ${logReleaseName} in namespace: ${logNamespace}"
                     sh "kubectl get pods -n ${logNamespace} -o wide | grep ${logReleaseName} || true"
-                    
+
                     // Collect logs using kubectl
                     sh """
                     mkdir -p k8s_log/${logReleaseName}
@@ -727,7 +727,7 @@ EOF
                     sh "tar -zcvf artifacts-${logReleaseName}-server-logs.tar.gz k8s_log/ --remove-files || true"
 
                     archiveArtifacts artifacts: "artifacts-${logReleaseName}-server-logs.tar.gz", allowEmptyArchive: true
-                    
+
                     // Always archive performance reports if they exist
                     if (fileExists("${env.ARTIFACTS}/reports/")) {
                         echo "Archiving performance reports..."

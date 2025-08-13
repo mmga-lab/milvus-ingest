@@ -7,23 +7,23 @@
 ```mermaid
 graph LR
     A[模式设计] --> B[数据生成]
-    B --> C[本地验证] 
+    B --> C[本地验证]
     C --> D[上传存储]
     D --> E[Milvus导入]
     E --> F[性能测试]
     F --> G[生产部署]
-    
+
     A1[内置模式] --> A
     A2[自定义模式] --> A
-    
+
     C --> C1[预览检查]
     C --> C2[小规模测试]
-    
+
     D --> D1[S3/MinIO]
-    
+
     E --> E1[直接插入]
     E --> E2[批量导入]
-    
+
     F --> F1[搜索性能]
     F --> F2[索引效果]
 ```
@@ -105,7 +105,7 @@ cat > schemas/knowledge_base.json << 'EOF'
     },
     {
       "name": "answer",
-      "type": "VarChar", 
+      "type": "VarChar",
       "max_length": 2000,
       "description": "标准答案"
     },
@@ -154,7 +154,7 @@ cat > schemas/knowledge_base.json << 'EOF'
       "description": "问题语义向量"
     },
     {
-      "name": "answer_embedding", 
+      "name": "answer_embedding",
       "type": "FloatVector",
       "dim": 768,
       "description": "答案语义向量"
@@ -229,34 +229,34 @@ import sys
 def validate_knowledge_base_data(data_dir):
     """验证知识库数据质量"""
     data_path = Path(data_dir)
-    
+
     # 读取数据
     parquet_file = data_path / "data.parquet"
     meta_file = data_path / "meta.json"
-    
+
     if not parquet_file.exists():
         print("❌ 数据文件不存在")
         return False
-        
+
     df = pd.read_parquet(parquet_file)
-    
+
     with open(meta_file) as f:
         meta = json.load(f)
-    
+
     print(f"📊 数据集统计:")
     print(f"  - 总行数: {len(df):,}")
     print(f"  - 字段数: {len(df.columns)}")
     print(f"  - 文件大小: {parquet_file.stat().st_size / 1024 / 1024:.1f} MB")
-    
+
     # 基础验证
     issues = []
-    
+
     # 检查主键唯一性
     if df['doc_id'].duplicated().any():
         issues.append("❌ 主键存在重复")
     else:
         print("✅ 主键唯一性检查通过")
-    
+
     # 检查必填字段
     required_fields = ['question', 'answer', 'category']
     for field in required_fields:
@@ -264,7 +264,7 @@ def validate_knowledge_base_data(data_dir):
             issues.append(f"❌ 字段 {field} 存在空值")
         else:
             print(f"✅ 字段 {field} 完整性检查通过")
-    
+
     # 检查向量维度
     vector_fields = ['question_embedding', 'answer_embedding']
     for field in vector_fields:
@@ -273,19 +273,19 @@ def validate_knowledge_base_data(data_dir):
             issues.append(f"❌ 向量字段 {field} 维度错误: {len(sample_vector)}")
         else:
             print(f"✅ 向量字段 {field} 维度正确: 768")
-    
+
     # 检查分类分布
     category_dist = df['category'].value_counts()
     print(f"\n📈 分类分布:")
     for category, count in category_dist.head(10).items():
         print(f"  - {category}: {count} ({count/len(df)*100:.1f}%)")
-    
+
     # 检查语言分布
     lang_dist = df['language'].value_counts()
     print(f"\n🌍 语言分布:")
     for lang, count in lang_dist.items():
         print(f"  - {lang}: {count} ({count/len(df)*100:.1f}%)")
-    
+
     if issues:
         print(f"\n⚠️  发现 {len(issues)} 个问题:")
         for issue in issues:
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("用法: python validate_data.py <data_directory>")
         sys.exit(1)
-    
+
     success = validate_knowledge_base_data(sys.argv[1])
     sys.exit(0 if success else 1)
 EOF
@@ -427,43 +427,43 @@ import sys
 
 def verify_milvus_import(uri, collection_name, expected_count):
     """验证 Milvus 导入结果"""
-    
+
     client = MilvusClient(uri=uri)
-    
+
     try:
         # 检查集合是否存在
         collections = client.list_collections()
         if collection_name not in collections:
             print(f"❌ 集合 {collection_name} 不存在")
             return False
-        
+
         print(f"✅ 集合 {collection_name} 存在")
-        
+
         # 获取集合统计
         stats = client.get_collection_stats(collection_name)
         actual_count = stats["row_count"]
-        
+
         print(f"📊 集合统计:")
         print(f"  - 预期行数: {expected_count:,}")
         print(f"  - 实际行数: {actual_count:,}")
         print(f"  - 匹配度: {actual_count/expected_count*100:.1f}%")
-        
+
         # 检查行数匹配
         if actual_count != expected_count:
             print(f"⚠️  行数不匹配")
             return False
-        
+
         # 测试查询
         results = client.query(
             collection_name=collection_name,
             limit=5,
             output_fields=["doc_id", "question", "category"]
         )
-        
+
         print(f"\n🔍 查询测试 (前5条):")
         for i, result in enumerate(results, 1):
             print(f"  {i}. ID:{result['doc_id']} | {result['category']} | {result['question'][:50]}...")
-        
+
         # 测试向量搜索
         search_results = client.search(
             collection_name=collection_name,
@@ -472,14 +472,14 @@ def verify_milvus_import(uri, collection_name, expected_count):
             limit=3,
             output_fields=["doc_id", "question"]
         )
-        
+
         print(f"\n🎯 向量搜索测试:")
         for i, result in enumerate(search_results[0], 1):
             print(f"  {i}. 相似度:{result['distance']:.3f} | {result['entity']['question'][:50]}...")
-        
+
         print(f"\n✅ Milvus 导入验证通过!")
         return True
-        
+
     except Exception as e:
         print(f"❌ 验证失败: {e}")
         return False
@@ -490,11 +490,11 @@ if __name__ == "__main__":
     if len(sys.argv) != 4:
         print("用法: python verify_import.py <milvus_uri> <collection_name> <expected_count>")
         sys.exit(1)
-    
+
     uri = sys.argv[1]
     collection_name = sys.argv[2]
     expected_count = int(sys.argv[3])
-    
+
     success = verify_milvus_import(uri, collection_name, expected_count)
     sys.exit(0 if success else 1)
 EOF
@@ -565,21 +565,21 @@ import statistics
 
 def benchmark_search(uri, collection_name, num_queries=100):
     """搜索性能基准测试"""
-    
+
     client = MilvusClient(uri=uri)
-    
+
     print(f"🚀 开始性能测试: {collection_name}")
     print(f"  - 查询次数: {num_queries}")
     print(f"  - 向量维度: 768")
-    
+
     search_times = []
-    
+
     for i in range(num_queries):
         # 生成随机查询向量
         query_vector = np.random.random(768).tolist()
-        
+
         start_time = time.time()
-        
+
         results = client.search(
             collection_name=collection_name,
             data=[query_vector],
@@ -587,13 +587,13 @@ def benchmark_search(uri, collection_name, num_queries=100):
             limit=10,
             output_fields=["doc_id", "question", "category"]
         )
-        
+
         search_time = time.time() - start_time
         search_times.append(search_time * 1000)  # 转换为毫秒
-        
+
         if (i + 1) % 20 == 0:
             print(f"  进度: {i+1}/{num_queries}")
-    
+
     # 统计结果
     avg_time = statistics.mean(search_times)
     median_time = statistics.median(search_times)
@@ -601,7 +601,7 @@ def benchmark_search(uri, collection_name, num_queries=100):
     max_time = max(search_times)
     p95_time = np.percentile(search_times, 95)
     p99_time = np.percentile(search_times, 99)
-    
+
     print(f"\n📊 搜索性能统计 (ms):")
     print(f"  - 平均响应时间: {avg_time:.2f}")
     print(f"  - 中位数响应时间: {median_time:.2f}")
@@ -610,9 +610,9 @@ def benchmark_search(uri, collection_name, num_queries=100):
     print(f"  - P95 响应时间: {p95_time:.2f}")
     print(f"  - P99 响应时间: {p99_time:.2f}")
     print(f"  - QPS (估算): {1000/avg_time:.1f}")
-    
+
     client.close()
-    
+
     return {
         "avg_time_ms": avg_time,
         "qps": 1000/avg_time,
@@ -625,10 +625,10 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("用法: python benchmark.py <milvus_uri> <collection_name>")
         sys.exit(1)
-    
+
     uri = sys.argv[1]
     collection_name = sys.argv[2]
-    
+
     benchmark_search(uri, collection_name)
 EOF
 
@@ -700,45 +700,45 @@ log_error() {
 # 检查前置条件
 check_prerequisites() {
     log_info "检查前置条件..."
-    
+
     # 检查必要的环境变量
     required_vars=(
         "PROD_MILVUS_URI"
-        "PROD_S3_ENDPOINT" 
+        "PROD_S3_ENDPOINT"
         "PROD_S3_BUCKET"
         "COLLECTION_NAME"
     )
-    
+
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             log_error "环境变量 $var 未设置"
             exit 1
         fi
     done
-    
+
     # 检查数据文件
     if [[ ! -d "data/kb_large" ]]; then
         log_error "生产数据目录不存在: data/kb_large"
         exit 1
     fi
-    
+
     log_info "前置条件检查通过"
 }
 
 # 备份现有集合
 backup_existing_collection() {
     log_info "备份现有集合..."
-    
+
     # 这里添加备份逻辑
     # 实际实现时可能需要导出现有数据
-    
+
     log_info "备份完成"
 }
 
 # 部署到生产环境
 deploy_to_production() {
     log_info "开始生产环境部署..."
-    
+
     # 上传数据到生产存储
     log_info "上传数据到生产存储..."
     milvus-ingest upload data/kb_large \
@@ -747,7 +747,7 @@ deploy_to_production() {
         --access-key-id $PROD_S3_ACCESS_KEY \
         --secret-access-key $PROD_S3_SECRET_KEY \
         --region $PROD_S3_REGION
-    
+
     # 导入到生产 Milvus
     log_info "导入数据到生产 Milvus..."
     milvus-ingest to-milvus import \
@@ -764,37 +764,37 @@ deploy_to_production() {
         --drop-if-exists \
         --wait \
         --timeout 3600
-    
+
     log_info "生产环境部署完成"
 }
 
 # 验证部署结果
 verify_deployment() {
     log_info "验证生产部署..."
-    
+
     # 运行验证脚本
     python scripts/verify_import.py \
         $PROD_MILVUS_URI \
         $COLLECTION_NAME \
         1000000
-    
+
     # 运行性能测试
     python scripts/benchmark.py \
         $PROD_MILVUS_URI \
         $COLLECTION_NAME
-    
+
     log_info "部署验证完成"
 }
 
 # 主流程
 main() {
     log_info "开始生产环境部署流程..."
-    
+
     check_prerequisites
     backup_existing_collection
     deploy_to_production
     verify_deployment
-    
+
     log_info "🎉 生产环境部署成功完成！"
 }
 
@@ -833,48 +833,48 @@ from datetime import datetime
 
 def health_check(uri, token, collection_name):
     """执行健康检查"""
-    
+
     client = MilvusClient(uri=uri, token=token)
-    
+
     health_status = {
         "timestamp": datetime.now().isoformat(),
         "collection": collection_name,
         "checks": {}
     }
-    
+
     try:
         # 1. 连接检查
         start_time = time.time()
         collections = client.list_collections()
         connection_time = time.time() - start_time
-        
+
         health_status["checks"]["connection"] = {
             "status": "OK",
             "response_time_ms": connection_time * 1000,
             "collections_count": len(collections)
         }
-        
+
         # 2. 集合存在检查
         if collection_name in collections:
             health_status["checks"]["collection_exists"] = {"status": "OK"}
         else:
             health_status["checks"]["collection_exists"] = {"status": "FAIL", "error": "Collection not found"}
             return health_status
-        
+
         # 3. 数据完整性检查
         stats = client.get_collection_stats(collection_name)
         row_count = stats["row_count"]
-        
+
         health_status["checks"]["data_integrity"] = {
             "status": "OK",
             "row_count": row_count,
             "expected_min": 1000000  # 预期最小行数
         }
-        
+
         if row_count < 1000000:
             health_status["checks"]["data_integrity"]["status"] = "WARN"
             health_status["checks"]["data_integrity"]["warning"] = "Row count below expected"
-        
+
         # 4. 查询性能检查
         start_time = time.time()
         results = client.query(
@@ -883,13 +883,13 @@ def health_check(uri, token, collection_name):
             output_fields=["doc_id"]
         )
         query_time = time.time() - start_time
-        
+
         health_status["checks"]["query_performance"] = {
             "status": "OK" if query_time < 0.1 else "WARN",
             "response_time_ms": query_time * 1000,
             "threshold_ms": 100
         }
-        
+
         # 5. 搜索性能检查
         start_time = time.time()
         search_results = client.search(
@@ -899,14 +899,14 @@ def health_check(uri, token, collection_name):
             limit=5
         )
         search_time = time.time() - start_time
-        
+
         health_status["checks"]["search_performance"] = {
             "status": "OK" if search_time < 0.05 else "WARN",
             "response_time_ms": search_time * 1000,
             "results_count": len(search_results[0]) if search_results else 0,
             "threshold_ms": 50
         }
-        
+
         # 总体状态
         all_checks = [check["status"] for check in health_status["checks"].values()]
         if all(status == "OK" for status in all_checks):
@@ -915,33 +915,33 @@ def health_check(uri, token, collection_name):
             health_status["overall_status"] = "UNHEALTHY"
         else:
             health_status["overall_status"] = "DEGRADED"
-            
+
     except Exception as e:
         health_status["checks"]["connection"] = {
             "status": "FAIL",
             "error": str(e)
         }
         health_status["overall_status"] = "UNHEALTHY"
-    
+
     finally:
         client.close()
-    
+
     return health_status
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         print("用法: python health_check.py <uri> <token> <collection_name>")
         sys.exit(1)
-    
+
     uri = sys.argv[1]
     token = sys.argv[2]
     collection_name = sys.argv[3]
-    
+
     status = health_check(uri, token, collection_name)
-    
+
     # 输出 JSON 格式结果
     print(json.dumps(status, indent=2))
-    
+
     # 根据状态设置退出码
     if status["overall_status"] == "HEALTHY":
         sys.exit(0)

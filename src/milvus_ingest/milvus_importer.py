@@ -183,8 +183,12 @@ class MilvusBulkImporter:
                     )
                     # Wait a bit for collection to be fully ready
                     if drop_if_exists:
-                        time.sleep(2)  # Give Milvus time to fully recreate the collection
-                        self.logger.info(f"Collection '{collection_name}' recreated, waiting for it to be ready...")
+                        time.sleep(
+                            2
+                        )  # Give Milvus time to fully recreate the collection
+                        self.logger.info(
+                            f"Collection '{collection_name}' recreated, waiting for it to be ready..."
+                        )
                 else:
                     # Just check if collection exists
                     if not self.client.has_collection(collection_name):
@@ -200,15 +204,19 @@ class MilvusBulkImporter:
             # Split files into batches of max_files_per_batch
             file_batches = []
             for i in range(0, len(actual_import_files), max_files_per_batch):
-                batch = actual_import_files[i:i + max_files_per_batch]
+                batch = actual_import_files[i : i + max_files_per_batch]
                 file_batches.append(batch)
 
-            self.logger.info(f"Split {len(actual_import_files)} files into {len(file_batches)} batches (max {max_files_per_batch} files per batch)")
+            self.logger.info(
+                f"Split {len(actual_import_files)} files into {len(file_batches)} batches (max {max_files_per_batch} files per batch)"
+            )
 
             # Submit all import jobs
             job_ids = []
             for batch_idx, batch_files in enumerate(file_batches, 1):
-                self.logger.info(f"Submitting batch {batch_idx}/{len(file_batches)} with {len(batch_files)} files")
+                self.logger.info(
+                    f"Submitting batch {batch_idx}/{len(file_batches)} with {len(batch_files)} files"
+                )
 
                 # Log file details for this batch
                 for i, file_path in enumerate(batch_files, 1):
@@ -220,7 +228,9 @@ class MilvusBulkImporter:
                         else "unknown"
                     )
                     if file_path.startswith("s3://"):
-                        self.logger.debug(f"  File {i}: {file_path} ({file_ext}, S3/MinIO)")
+                        self.logger.debug(
+                            f"  File {i}: {file_path} ({file_ext}, S3/MinIO)"
+                        )
                     else:
                         # For relative paths, just show the filename
                         self.logger.debug(
@@ -231,7 +241,9 @@ class MilvusBulkImporter:
                 batch_file_list = [[f] for f in batch_files]
 
                 # Start bulk import for this batch with retry logic
-                self.logger.info(f"Initiating bulk import request for batch {batch_idx}...")
+                self.logger.info(
+                    f"Initiating bulk import request for batch {batch_idx}..."
+                )
 
                 max_retries = 3
                 retry_count = 0
@@ -240,12 +252,16 @@ class MilvusBulkImporter:
                         # Check if collection still exists before submitting batch
                         if not self.client.has_collection(collection_name):
                             if retry_count < max_retries - 1:
-                                self.logger.warning(f"Collection '{collection_name}' not found, retrying in 3 seconds... (attempt {retry_count + 1}/{max_retries})")
+                                self.logger.warning(
+                                    f"Collection '{collection_name}' not found, retrying in 3 seconds... (attempt {retry_count + 1}/{max_retries})"
+                                )
                                 time.sleep(3)
                                 retry_count += 1
                                 continue
                             else:
-                                raise ValueError(f"Collection '{collection_name}' was dropped or does not exist")
+                                raise ValueError(
+                                    f"Collection '{collection_name}' was dropped or does not exist"
+                                )
 
                         resp = bulk_import(
                             url=self.uri,
@@ -265,11 +281,15 @@ class MilvusBulkImporter:
 
                     except Exception as e:
                         if retry_count < max_retries - 1:
-                            self.logger.warning(f"Batch {batch_idx} failed, retrying in 5 seconds... Error: {e}")
+                            self.logger.warning(
+                                f"Batch {batch_idx} failed, retrying in 5 seconds... Error: {e}"
+                            )
                             time.sleep(5)
                             retry_count += 1
                         else:
-                            self.logger.error(f"Batch {batch_idx} failed after {max_retries} attempts: {e}")
+                            self.logger.error(
+                                f"Batch {batch_idx} failed after {max_retries} attempts: {e}"
+                            )
                             raise
 
             self.logger.info("=" * 50)
@@ -316,14 +336,20 @@ class MilvusBulkImporter:
         completed_jobs = set()
         failed_jobs = set()
 
-        self.logger.info(f"⏳ Waiting for {total_jobs} import jobs to complete (timeout: {timeout}s)...")
+        self.logger.info(
+            f"⏳ Waiting for {total_jobs} import jobs to complete (timeout: {timeout}s)..."
+        )
         print(f"⏳ Monitoring {total_jobs} import jobs...")
 
         last_log_time = 0.0
 
         while time.time() - start_time < timeout:
             # Check status of all pending jobs
-            pending_jobs = [jid for jid in job_ids if jid not in completed_jobs and jid not in failed_jobs]
+            pending_jobs = [
+                jid
+                for jid in job_ids
+                if jid not in completed_jobs and jid not in failed_jobs
+            ]
 
             if not pending_jobs:
                 # All jobs are done
@@ -359,7 +385,9 @@ class MilvusBulkImporter:
                     # Check if job completed or failed
                     if state in ["ImportCompleted", "Completed"]:
                         completed_jobs.add(job_id)
-                        self.logger.info(f"✅ Job {job_id} completed ({len(completed_jobs)}/{total_jobs})")
+                        self.logger.info(
+                            f"✅ Job {job_id} completed ({len(completed_jobs)}/{total_jobs})"
+                        )
                     elif state in ["ImportFailed", "Failed"]:
                         failed_jobs.add(job_id)
                         reason = job_info.get("reason", "Unknown error")
@@ -370,27 +398,42 @@ class MilvusBulkImporter:
 
             # Log progress every 10 seconds
             elapsed = time.time() - start_time
-            if elapsed - last_log_time >= 10 or len(completed_jobs) + len(failed_jobs) == total_jobs:
+            if (
+                elapsed - last_log_time >= 10
+                or len(completed_jobs) + len(failed_jobs) == total_jobs
+            ):
                 # Calculate overall progress
-                overall_progress = (len(completed_jobs) + len(failed_jobs)) / total_jobs * 100
+                overall_progress = (
+                    (len(completed_jobs) + len(failed_jobs)) / total_jobs * 100
+                )
 
-                print(f"📊 Overall progress: {overall_progress:.1f}% | Completed: {len(completed_jobs)}/{total_jobs} | Failed: {len(failed_jobs)} | Rows: {total_imported_rows:,}/{total_rows_all_jobs:,} | Time: {elapsed:.1f}s")
+                print(
+                    f"📊 Overall progress: {overall_progress:.1f}% | Completed: {len(completed_jobs)}/{total_jobs} | Failed: {len(failed_jobs)} | Rows: {total_imported_rows:,}/{total_rows_all_jobs:,} | Time: {elapsed:.1f}s"
+                )
 
                 self.logger.info("=" * 50)
                 self.logger.info("Import batch progress update:")
-                self.logger.info(f"  Completed jobs: {len(completed_jobs)}/{total_jobs}")
+                self.logger.info(
+                    f"  Completed jobs: {len(completed_jobs)}/{total_jobs}"
+                )
                 self.logger.info(f"  Failed jobs: {len(failed_jobs)}")
                 self.logger.info(f"  Pending jobs: {len(pending_jobs)}")
-                self.logger.info(f"  Total rows imported: {total_imported_rows:,} / {total_rows_all_jobs:,}")
+                self.logger.info(
+                    f"  Total rows imported: {total_imported_rows:,} / {total_rows_all_jobs:,}"
+                )
                 self.logger.info(f"  Elapsed time: {elapsed:.1f}s")
 
                 # Log individual job statuses
-                if pending_jobs and len(pending_jobs) <= 10:  # Only show details for small number of jobs
+                if (
+                    pending_jobs and len(pending_jobs) <= 10
+                ):  # Only show details for small number of jobs
                     self.logger.info("  Pending job statuses:")
                     for job_id in pending_jobs[:10]:
                         if job_id in job_statuses:
                             status = job_statuses[job_id]
-                            self.logger.info(f"    {job_id}: {status['state']} ({status['progress']}%)")
+                            self.logger.info(
+                                f"    {job_id}: {status['state']} ({status['progress']}%)"
+                            )
 
                 last_log_time = elapsed
 

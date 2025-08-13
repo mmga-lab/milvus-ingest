@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from ..logging_config import get_logger
@@ -151,8 +149,11 @@ class ReportGenerator:
 
         # Generate report based on format (removed CSV, now use ReportAnalyzer)
         from .llm_generator import ReportAnalyzer
-        analyzer = ReportAnalyzer(self.config, glm_api_key=glm_api_key, glm_model=glm_model)
-        
+
+        analyzer = ReportAnalyzer(
+            self.config, glm_api_key=glm_api_key, glm_model=glm_model
+        )
+
         return analyzer.generate_report(
             job_ids=job_ids,
             collection_name=collection_name,
@@ -436,4 +437,3 @@ class ReportGenerator:
             return size * 1024 * 1024 * 1024 * 1024
         else:
             return size
-
