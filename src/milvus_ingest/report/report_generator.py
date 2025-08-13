@@ -37,7 +37,7 @@ class ReportGenerator:
         milvus_namespace: str | None = None,
         import_info_file: str | None = None,
         glm_api_key: str | None = None,
-        glm_model: str = "glm-4-flash",
+        glm_model: str = "glm-4.5-air",
     ) -> dict[str, Any]:
         """Generate import performance report.
 

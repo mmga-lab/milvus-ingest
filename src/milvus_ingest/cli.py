@@ -1315,7 +1315,7 @@ def report() -> None:
     help="GLM API key for analysis (or set GLM_API_KEY env var)",
 )
 @click.option(
-    "--glm-model", default="glm-4-flash", help="GLM model to use (default: glm-4-flash)"
+    "--glm-model", default="glm-4.5-air", help="GLM model to use (default: glm-4.5-air)"
 )
 def generate_report(
     job_ids: tuple,

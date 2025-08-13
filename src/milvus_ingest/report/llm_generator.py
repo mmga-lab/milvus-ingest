@@ -22,7 +22,7 @@ class ReportAnalyzer:
         self,
         config: ReportConfig,
         glm_api_key: str | None = None,
-        glm_model: str = "glm-4-flash",
+        glm_model: str = "glm-4.5-air",
     ):
         """Initialize the report analyzer.
 
@@ -160,8 +160,10 @@ class ReportAnalyzer:
             # Get analysis from GLM using raw data
             analysis_result = self.glm_analyzer.analyze(raw_data, GLM_ANALYSIS_PROMPT)
 
-            # Format the final report
-            formatted_report = format_analysis_report(analysis_result, raw_data)
+            # Format the final report with actual model name
+            formatted_report = format_analysis_report(
+                analysis_result, raw_data, model_name=self.glm_analyzer.model
+            )
 
             # Write analysis report to file
             output_path = Path(output_file)

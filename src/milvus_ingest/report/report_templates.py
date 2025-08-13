@@ -45,57 +45,95 @@ COMPREHENSIVE_REPORT_TEMPLATE = """
 """
 
 
-GLM_ANALYSIS_PROMPT = """You are a Milvus import data organizer. Based on the provided raw data, generate a structured factual report without analysis or recommendations.
+GLM_ANALYSIS_PROMPT = """Generate a Milvus import performance report. Focus on extracting numeric metrics from the provided JSON data.
 
-## Data to Analyze:
+## Input Data Structure:
 {data_json}
 
-## Instructions:
-Generate a structured data report with the following sections, using only the facts from the provided data:
+## CRITICAL: Prometheus Metrics Extraction
+The prometheus_metrics.raw_queries contains metrics with this structure:
+- Path: prometheus_metrics.raw_queries.[metric_name].response.data.result[0].values
+- Values format: [[timestamp, "value"], [timestamp, "value"], ...]
+- Extract the second element (value) from each pair and convert to float
 
-1. **Import Summary**
-   - Test date/time: Extract from start_time/end_time if available
-   - Job IDs: List all job IDs found in data
-   - Collection name: If specified
-   - Total duration: Calculate from phase timings
-   - Data volume: Total rows and file size from the data
-   - Overall status: success/failed based on error messages
+### Required Calculations:
+For memory (milvus_memory): Convert bytes to GB by dividing by 1073741824
+For CPU (milvus_cpu): Show as decimal (0.5 = 50% or 0.5 cores)
+For IOPS: Average the values directly
+For bytes: Convert to MB/s by dividing by 1048576
 
-2. **Performance Metrics**
-   - Import Timeline: Create a markdown table showing each phase with:
-     - Phase name (from import_phase)
-     - Duration (from time_cost, convert to seconds)
-     - Percentage of total time
-   - Throughput Data: Calculate rows/sec and MB/sec if data is available
+## Report Sections:
 
-3. **Resource Utilization**
-   - Compute Resources: Present CPU cores and memory usage data if available
-   - Storage Performance: Show IOPS and throughput metrics if present
-   - Format as simple tables with available values
+### 1. Import Summary
+Extract from import_info and metadata:
+- Job ID: First element of job_ids array
+- Collection: collection_name field
+- Status: status field (completed/failed)
+- Duration: total_duration_seconds (format as X.XX seconds)
+- Data Volume: total_rows (with thousand separators)
+- Data Size: file_info.total_size_bytes (convert to GB)
 
-4. **Data Details**
-   - File Information: File count, sizes, types from the data
-   - Collection schema details if available
-   - Configuration parameters found in logs
+### 2. Performance Timeline
+Search loki_logs for entries containing "jobTimeCost":
+- Pattern: [jobTimeCost/PHASE=DURATION]
+- Extract phase name and duration
+- Calculate percentage of total time
+- Sort by timestamp
+Create table: | Phase | Duration | Percentage |
 
-5. **Log Messages**
-   - List any error or warning messages found
-   - Note any significant events or completion messages
+### 3. Resource Metrics Analysis
+From prometheus_metrics.raw_queries, for each metric:
 
-Format the report in clean markdown with proper headers and tables.
-Only present facts from the data - do not add analysis, interpretations, or recommendations.
-If data is missing for any section, simply note "Data not available" or omit empty sections."""
+| Metric Type | Average | Minimum | Maximum | Unit |
+|-------------|---------|---------|---------|------|
+| Memory (milvus_memory) | Calculate from values | Min value | Max value | GB |
+| CPU (milvus_cpu) | Calculate from values | Min value | Max value | cores |
+| Read IOPS (minio_read_iops) | Calculate from values | Min value | Max value | ops/s |
+| Write IOPS (minio_write_iops) | Calculate from values | Min value | Max value | ops/s |
+| Read Throughput (minio_read_bytes) | Calculate from values | Min value | Max value | MB/s |
+| Write Throughput (minio_write_bytes) | Calculate from values | Min value | Max value | MB/s |
+
+### 4. Performance Indicators
+Calculate and display:
+- Import Throughput: total_rows / total_duration_seconds (rows/sec)
+- Data Processing Rate: total_size_bytes / total_duration_seconds / 1048576 (MB/s)
+- Memory Efficiency: peak_memory / average_memory ratio
+- Resource Utilization: CPU and memory usage patterns
+
+### 5. Data Configuration
+From import_info:
+- File count and types
+- Schema configuration
+- Test parameters
+
+### 6. Key Events
+From loki_logs:
+- List errors (if any)
+- Show completion timestamps for each phase
+
+Format all numbers appropriately (2 decimal places for decimals, thousand separators for large numbers)."""
 
 
-def format_analysis_report(glm_response: str, raw_data: dict[str, Any]) -> str:
-    """Format the final analysis report with GLM response and additional context."""
+def format_analysis_report(
+    glm_response: str, raw_data: dict[str, Any], model_name: str = "GLM"
+) -> str:
+    """Format the final analysis report with GLM response and additional context.
+    
+    Args:
+        glm_response: The analysis result from GLM
+        raw_data: The raw data dictionary
+        model_name: The actual GLM model used (e.g., 'glm-4.5', 'glm-4.5-air', 'glm-4-flash')
+    """
 
     # The GLM response should already be well-formatted markdown
     # We can add a header/footer if needed
 
-    header = "<!-- Generated by Milvus Import Analyzer with GLM-4-Flash -->\n"
+    # Format model name for display
+    display_model = model_name.upper().replace("-", " ")
+    
+    header = f"<!-- Generated by Milvus Import Analyzer with {display_model} -->\n"
 
-    footer = "\n\n---\n*Report generated using GLM-4-Flash analysis engine*\n"
+    footer = f"\n\n---\n*Report generated using {display_model} analysis engine*\n"
 
     if "metadata" in raw_data:
         meta = raw_data["metadata"]
