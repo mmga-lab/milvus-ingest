@@ -45,73 +45,106 @@ COMPREHENSIVE_REPORT_TEMPLATE = """
 """
 
 
-GLM_ANALYSIS_PROMPT = """Generate a Milvus import performance report. Focus on extracting numeric metrics from the provided JSON data.
+GLM_ANALYSIS_PROMPT = """Generate a Milvus import test report with the following metrics. Extract data from the provided JSON.
 
-## Input Data Structure:
+## Input Data:
 {data_json}
 
-## CRITICAL: Prometheus Metrics Extraction
-The prometheus_metrics.raw_queries contains metrics with this structure:
-- Path: prometheus_metrics.raw_queries.[metric_name].response.data.result[0].values
-- Values format: [[timestamp, "value"], [timestamp, "value"], ...]
-- Extract the second element (value) from each pair and convert to float
+## REQUIRED METRICS (按测试场景需求):
 
-### Required Calculations:
-For memory (milvus_memory): Convert bytes to GB by dividing by 1073741824
-For CPU (milvus_cpu): Show as decimal (0.5 = 50% or 0.5 cores)
-For IOPS: Average the values directly
-For bytes: Convert to MB/s by dividing by 1048576
+### 1. 测试场景 (Test Scenario)
+From metadata.test_scenario or import_info.test_parameters:
+- Test scenario description
+- Schema type
+- File format and configuration
 
-## Report Sections:
+### 2. 总行数 (Total Rows)
+From import_info.total_rows - show with thousand separators
 
-### 1. Import Summary
-Extract from import_info and metadata:
-- Job ID: First element of job_ids array
-- Collection: collection_name field
-- Status: status field (completed/failed)
-- Duration: total_duration_seconds (format as X.XX seconds)
-- Data Volume: total_rows (with thousand separators)
-- Data Size: file_info.total_size_bytes (convert to GB)
+### 3. 文件类型 (File Type)
+From import_info.file_types array
 
-### 2. Performance Timeline
-Search loki_logs for entries containing "jobTimeCost":
-- Pattern: [jobTimeCost/PHASE=DURATION]
-- Extract phase name and duration
-- Calculate percentage of total time
-- Sort by timestamp
-Create table: | Phase | Duration | Percentage |
+### 4. 导入结果 (Import Result)
+From import_info.status - show as SUCCESS/FAILED
 
-### 3. Resource Metrics Analysis
-From prometheus_metrics.raw_queries, for each metric:
+### 5. 总耗时 (Total Duration)
+From import_info.total_duration_seconds - format as seconds
 
-| Metric Type | Average | Minimum | Maximum | Unit |
-|-------------|---------|---------|---------|------|
-| Memory (milvus_memory) | Calculate from values | Min value | Max value | GB |
-| CPU (milvus_cpu) | Calculate from values | Min value | Max value | cores |
-| Read IOPS (minio_read_iops) | Calculate from values | Min value | Max value | ops/s |
-| Write IOPS (minio_write_iops) | Calculate from values | Min value | Max value | ops/s |
-| Read Throughput (minio_read_bytes) | Calculate from values | Min value | Max value | MB/s |
-| Write Throughput (minio_write_bytes) | Calculate from values | Min value | Max value | MB/s |
+### 6. 各阶段耗时 (Phase Duration)
+Search loki_logs for "jobTimeCost" entries:
+Extract: [jobTimeCost/PHASE=DURATION]
+Create simple table:
+| Phase | Duration |
+|-------|----------|
+| preimport | X.XXs |
+| import | X.XXs |
+| stats | X.XXs |
+| buildIndex | X.XXs |
+| l0Import | X.XXXµs |
 
-### 4. Performance Indicators
-Calculate and display:
-- Import Throughput: total_rows / total_duration_seconds (rows/sec)
-- Data Processing Rate: total_size_bytes / total_duration_seconds / 1048576 (MB/s)
-- Memory Efficiency: peak_memory / average_memory ratio
-- Resource Utilization: CPU and memory usage patterns
+### 7. DataNode Memory
+From prometheus_metrics.raw_queries.milvus_memory:
+- Path: response.data.result[0].values
+- Extract values, convert to GB (divide by 1073741824)
+- Show: Average, Min, Max in GB
 
-### 5. Data Configuration
-From import_info:
-- File count and types
-- Schema configuration
-- Test parameters
+### 8. DataNode CPU
+From prometheus_metrics.raw_queries.milvus_cpu:
+- Path: response.data.result[0].values
+- Show as cores: Average, Min, Max
 
-### 6. Key Events
-From loki_logs:
-- List errors (if any)
-- Show completion timestamps for each phase
+### 9. S3/MinIO IOPS
+From prometheus_metrics.raw_queries:
+- minio_read_iops: Average, Max
+- minio_write_iops: Average, Max
 
-Format all numbers appropriately (2 decimal places for decimals, thousand separators for large numbers)."""
+### 10. S3/MinIO Throughput
+From prometheus_metrics.raw_queries:
+- minio_read_bytes: Convert to MB/s (divide by 1048576)
+- minio_write_bytes: Convert to MB/s
+
+### 11. Binlog Count
+From prometheus_metrics.raw_queries.binlog_count:
+- Extract final value (last in values array)
+
+### 12. Binlog Size
+From prometheus_metrics.raw_queries.binlog_size:
+- Extract final value, convert to GB
+
+### 13. 备注 (Notes)
+From metadata.notes or any error messages in loki_logs
+
+## OUTPUT FORMAT:
+
+Create a clean summary table with all metrics:
+
+| Metric | Value |
+|--------|-------|
+| Test Scenario | (extract from data) |
+| Total Rows | (show with commas) |
+| File Type | (from file_types) |
+| Import Result | SUCCESS or FAILED |
+| Total Duration | X.XX seconds |
+| DataNode Memory | Avg: X.XX GB, Min: X.XX GB, Max: X.XX GB |
+| DataNode CPU | Avg: X.XX cores, Min: X.XX cores, Max: X.XX cores |
+| MinIO Read IOPS | Avg: X.XX, Max: X.XX |
+| MinIO Write IOPS | Avg: X.XX, Max: X.XX |
+| MinIO Read Throughput | Avg: X.XX MB/s, Max: X.XX MB/s |
+| MinIO Write Throughput | Avg: X.XX MB/s, Max: X.XX MB/s |
+| Binlog Count | (final value) |
+| Binlog Size | X.XX GB |
+| Notes | (any notes or N/A) |
+
+Phase Duration Table:
+| Phase | Duration |
+|-------|----------|
+| preimport | X.XX s |
+| import | X.XX s |
+| stats | X.XX s |
+| buildIndex | X.XX s |
+| l0Import | X.XXX µs |
+
+Focus on data extraction only. Do not add analysis or recommendations."""
 
 
 def format_analysis_report(
