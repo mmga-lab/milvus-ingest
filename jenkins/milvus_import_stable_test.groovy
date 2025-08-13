@@ -81,21 +81,27 @@ pipeline {
 
 CURRENT AVAILABLE SCHEMAS:
 • product_catalog - Simple product catalog with auto_id (4 fields, 128d vectors)
-• ecommerce_search - E-commerce with nullable fields (5 fields, 256d vectors)
-• news_articles - News with dynamic fields (4 fields, 768d vectors)
-• document_search - Document search with sparse vectors + BM25 (5 fields, 768d vectors)
-• multi_tenant_data - Multi-tenant with partitioning (5 fields, 256d vectors)
-• multimedia_content - Multiple vector types + nullable fields (7 fields, 256d+384d+128d vectors)
+  Use cases: Learning, Basic product search, Auto ID demonstration
+• ecommerce_search - E-commerce product search with nullable fields (5 fields, 256d vectors)
+  Use cases: Product search, E-commerce, Nullable field handling
+• news_articles - News article storage with dynamic fields (4 fields, 768d vectors)
+  Use cases: News search, Dynamic schema, Content management
+• document_search - Document search with sparse vectors and BM25 (5 fields, 768d vectors)
+  Use cases: Sparse vector search, BM25 functions, Hybrid search
+• multi_tenant_data - Multi-tenant customer support system with partitioning (5 fields, 256d vectors)
+  Use cases: Multi-tenant SaaS, Partition keys, Support tickets
+• multimedia_content - Multimedia content with multiple vector types and nullable fields (7 fields, 256d+384d+128d vectors)
+  Use cases: Media search, Multiple vector types, Default values
 
 Select based on specific testing requirements (BM25, dynamic fields, multi-vector, partitioning, etc.)''',
             name: 'schema_type',
             choices: [
                 'product_catalog',     // Simple product catalog with auto_id (4 fields, 128d)
-                'ecommerce_search',    // E-commerce with nullable fields (5 fields, 256d)
-                'news_articles',       // News with dynamic fields (4 fields, 768d)
-                'document_search',     // Document search with sparse vectors + BM25 (5 fields, 768d)
-                'multi_tenant_data',   // Multi-tenant with partitioning (5 fields, 256d)
-                'multimedia_content'   // Multiple vector types + nullable fields (7 fields, 256d+384d+128d)
+                'ecommerce_search',    // E-commerce product search with nullable fields (5 fields, 256d)
+                'news_articles',       // News article storage with dynamic fields (4 fields, 768d)
+                'document_search',     // Document search with sparse vectors and BM25 (5 fields, 768d)
+                'multi_tenant_data',   // Multi-tenant customer support system with partitioning (5 fields, 256d)
+                'multimedia_content'   // Multimedia content with multiple vector types and nullable fields (7 fields, 256d+384d+128d)
             ]
         )
         string(
@@ -590,13 +596,15 @@ EOF
                         echo "Pods matching pattern:"
                         kubectl get pods -n \${REPORT_NAMESPACE} -l app.kubernetes.io/instance=\${REPORT_RELEASE_NAME} --no-headers -o custom-columns=":metadata.name" || true
                         
-                        # Generate CSV performance report (let the CLI handle all the JSON parsing)
-                        CSV_REPORT="${env.REPORT_DIR}/import-performance-summary-${env.BUILD_ID}.csv"
+                        # Generate performance report using import info file
+                        RAW_REPORT="${env.REPORT_DIR}/import-performance-raw-${env.BUILD_ID}.json"
+                        ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
                         
-                        echo "Generating performance report using import info file..."
+                        echo "Generating raw performance data using import info file..."
                         pdm run milvus-ingest report generate \\
                             --import-info-file "${env.IMPORT_INFO}" \\
-                            --output "\${CSV_REPORT}" \\
+                            --output "\${RAW_REPORT}" \\
+                            --format raw \\
                             --loki-url "${params.loki_url}" \\
                             --prometheus-url "${params.prometheus_url}" \\
                             --pod-pattern "\${POD_PATTERN}" \\
@@ -604,12 +612,54 @@ EOF
                             --milvus-namespace "\${REPORT_NAMESPACE}" \\
                             --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
                             --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
-                            --timeout 60 || echo "Report generation failed, but continuing..."
+                            --timeout 60 || echo "Raw report generation failed, but continuing..."
                         
+                        """
+                        
+                        // Generate GLM analysis report using default credential ID
+                        script {
+                            try {
+                                echo "Attempting to generate GLM analysis report..."
+                                withCredentials([string(credentialsId: 'glm-api-key', variable: 'GLM_API_KEY')]) {
+                                    sh """
+                                    ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
+                                    
+                                    pdm run milvus-ingest report generate \\
+                                        --import-info-file "${env.IMPORT_INFO}" \\
+                                        --output "\${ANALYSIS_REPORT}" \\
+                                        --format analysis \\
+                                        --glm-api-key "\${GLM_API_KEY}" \\
+                                        --loki-url "${params.loki_url}" \\
+                                        --prometheus-url "${params.prometheus_url}" \\
+                                        --pod-pattern "${POD_PATTERN}" \\
+                                        --release-name "${REPORT_RELEASE_NAME}" \\
+                                        --milvus-namespace "${REPORT_NAMESPACE}" \\
+                                        --test-scenario "${params.schema_type} Import Test (${params.file_count} × ${params.file_size} ${params.file_format})" \\
+                                        --notes "Jenkins Build ${env.BUILD_NUMBER} - Storage ${params.storage_version}, Upload: ${params.upload_method}" \\
+                                        --timeout 60 || {
+                                            echo "GLM analysis report generation failed - API error or invalid key"
+                                            echo "Note: GLM analysis failed - only raw data report available" > "\${ANALYSIS_REPORT}"
+                                        }
+                                    """
+                                }
+                            } catch (Exception e) {
+                                echo "GLM API key credential 'glm-api-key' not found, skipping AI-powered analysis report"
+                                sh """
+                                ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
+                                echo "Note: GLM API key credential not configured - only raw data report generated" > "\${ANALYSIS_REPORT}"
+                                """
+                            }
+                        }
+                        
+                        sh """
                         # Copy reports to Jenkins artifacts directory
+                        RAW_REPORT="${env.REPORT_DIR}/import-performance-raw-${env.BUILD_ID}.json"
+                        ANALYSIS_REPORT="${env.REPORT_DIR}/import-performance-analysis-${env.BUILD_ID}.md"
+                        
                         mkdir -p ${env.ARTIFACTS}/reports
                         cp -f ${env.IMPORT_INFO} ${env.ARTIFACTS}/import_info.json || true
-                        cp -f "\${CSV_REPORT}" ${env.ARTIFACTS}/reports/ || true
+                        cp -f "\${RAW_REPORT}" ${env.ARTIFACTS}/reports/ || true
+                        cp -f "\${ANALYSIS_REPORT}" ${env.ARTIFACTS}/reports/ || true
                         
                         # Generate a summary report for easy consumption
                         cat > ${env.ARTIFACTS}/reports/report_summary.txt << EOF
@@ -633,7 +683,8 @@ Test Configuration:
 - Upload Method: ${params.upload_method}
 
 Report Files:
-- CSV Summary: import-performance-summary-${env.BUILD_ID}.csv
+- Raw Data: import-performance-raw-${env.BUILD_ID}.json (raw metrics and logs)
+- Analysis Report: import-performance-analysis-${env.BUILD_ID}.md (GLM-powered analysis)
 - Import Info: import_info.json (contains job IDs, timing, and collection details)
 
 Data Sources:

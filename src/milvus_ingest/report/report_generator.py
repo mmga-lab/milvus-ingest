@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import re
 from collections import defaultdict
@@ -32,13 +31,15 @@ class ReportGenerator:
         collection_name: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
-        output_file: str = "/tmp/import_summary.csv",
-        output_format: str = "csv",
+        output_file: str = "/tmp/import_analysis.md",
+        output_format: str = "analysis",
         test_scenario: str | None = None,
         notes: str | None = None,
         release_name: str | None = None,
         milvus_namespace: str | None = None,
         import_info_file: str | None = None,
+        glm_api_key: str | None = None,
+        glm_model: str = "glm-4-flash",
     ) -> dict[str, Any]:
         """Generate import performance report.
 
@@ -48,7 +49,14 @@ class ReportGenerator:
             start_time: Start time for analysis
             end_time: End time for analysis
             output_file: Output file path
-            output_format: Output format ('csv' or 'llm')
+            output_format: Output format ('analysis' for GLM analysis or 'raw' for raw data)
+            test_scenario: Test scenario description
+            notes: Additional notes
+            release_name: Milvus release name
+            milvus_namespace: Milvus namespace
+            import_info_file: Path to import_info.json file
+            glm_api_key: GLM API key for analysis
+            glm_model: GLM model to use (default: glm-4-flash)
 
         Returns:
             Dictionary with import summary
@@ -60,39 +68,27 @@ class ReportGenerator:
         job_summaries = {}
 
         if job_ids:
-            # Collect data for specific job IDs
+            # Collect raw logs for specific job IDs
             for job_id in job_ids:
-                self.logger.info(f"Collecting data for job ID: {job_id}")
-                timing_data = self.loki_collector.collect_import_timing_data(
+                self.logger.info(f"Collecting logs for job ID: {job_id}")
+                raw_logs = self.loki_collector.collect_raw_logs(
                     job_id=job_id,
                     collection_name=collection_name,
                     start_time=start_time,
                     end_time=end_time,
                 )
-                all_timing_data.extend(timing_data)
-
-                # Summarize per job
-                job_summaries[job_id] = self._summarize_job(timing_data)
+                all_timing_data.append(raw_logs)
         else:
-            # Collect all import data in time range
-            timing_data = self.loki_collector.collect_import_timing_data(
+            # Collect all logs in time range
+            raw_logs = self.loki_collector.collect_raw_logs(
                 collection_name=collection_name,
                 start_time=start_time,
                 end_time=end_time,
             )
-            all_timing_data = timing_data
+            all_timing_data = [raw_logs]
 
-            # Group by job ID
-            jobs_data = defaultdict(list)
-            for data in timing_data:
-                if data.job_id:
-                    jobs_data[data.job_id].append(data)
-
-            for job_id, job_data in jobs_data.items():
-                job_summaries[job_id] = self._summarize_job(job_data)
-
-        # Extract additional information from logs
-        import_info = self._extract_import_info(all_timing_data)
+        # Initialize import_info with basic structure
+        import_info = {}
 
         # Load additional metadata from import_info.json if provided
         import_metadata = {}
@@ -113,96 +109,35 @@ class ReportGenerator:
 
                     for job_id in job_ids:
                         self.logger.info(
-                            f"Collecting data for job ID from import_info.json: {job_id}"
+                            f"Collecting logs for job ID from import_info.json: {job_id}"
                         )
-                        timing_data = self.loki_collector.collect_import_timing_data(
+                        raw_logs = self.loki_collector.collect_raw_logs(
                             job_id=job_id,
                             collection_name=collection_name,
                             start_time=start_time,
                             end_time=end_time,
                         )
-                        all_timing_data.extend(timing_data)
+                        all_timing_data.append(raw_logs)
 
-                        # Summarize per job
-                        job_summaries[job_id] = self._summarize_job(timing_data)
-
-                    # Re-extract import info with the filtered data, but preserve important metadata
-                    log_extracted_info = self._extract_import_info(all_timing_data)
-
-                    # Preserve important data from import_info.json/meta.json that shouldn't be overwritten by log parsing
-                    preserved_fields = [
-                        "total_rows",
-                        "file_info",
-                        "collection_schema",
-                        "collection_name",
-                        "file_type",
-                    ]
-                    temp_preserved = {}
-                    for field in preserved_fields:
-                        if field in import_info and import_info[field]:
-                            # For file_info, preserve non-zero values
-                            if field == "file_info":
-                                if (
-                                    import_info[field].get("total_size", 0) > 0
-                                    or import_info[field].get("file_count", 0) > 0
-                                ):
-                                    temp_preserved[field] = import_info[field]
-                            # For total_rows, preserve non-zero values
-                            elif field == "total_rows":
-                                if import_info[field] > 0:
-                                    temp_preserved[field] = import_info[field]
-                            # For other fields, always preserve if they exist
-                            else:
-                                temp_preserved[field] = import_info[field]
-
-                    # Update with log extracted info first
-                    import_info.update(log_extracted_info)
-
-                    # Then restore preserved metadata
-                    import_info.update(temp_preserved)
+                    # Keep import_info as is since GLM will process raw data directly
 
         # Collect Prometheus metrics if release_name and namespace provided
         if release_name and milvus_namespace and self.config.prometheus_url:
             try:
                 self.logger.info(
-                    f"Collecting Prometheus metrics for {release_name} in namespace {milvus_namespace}"
+                    f"Collecting Prometheus raw metrics for {release_name} in namespace {milvus_namespace}"
                 )
 
-                # Auto-detect deployment mode if configured to do so
-                if self.config.deployment_mode == "auto":
-                    detected_mode = self.prometheus_collector.detect_deployment_mode(
-                        release_name, milvus_namespace
-                    )
-                    self.logger.info(f"Auto-detected deployment mode: {detected_mode}")
-
-                # Collect DataNode metrics (works for both cluster and standalone)
-                datanode_metrics = self.prometheus_collector.collect_datanode_metrics(
+                # Collect raw Prometheus metrics
+                prometheus_metrics = self.prometheus_collector.collect_raw_metrics(
                     release_name=release_name,
                     namespace=milvus_namespace,
                     start_time=start_time,
                     end_time=end_time,
-                )
-
-                # Collect S3/MinIO metrics
-                s3_metrics = self.prometheus_collector.collect_s3_minio_metrics(
-                    release_name=release_name,
-                    namespace=milvus_namespace,
-                    start_time=start_time,
-                    end_time=end_time,
-                )
-
-                # Collect binlog metrics
-                binlog_metrics = self.prometheus_collector.collect_binlog_metrics(
-                    release_name=release_name
                 )
 
                 # Add metrics to import_info
-                import_info["prometheus_metrics"] = {
-                    "datanode": datanode_metrics,
-                    "s3_minio": s3_metrics,
-                    "binlog": binlog_metrics,
-                    "time_range_used": start_time and end_time,
-                }
+                import_info["prometheus_metrics"] = prometheus_metrics
 
             except Exception as e:
                 self.logger.warning(f"Failed to collect Prometheus metrics: {e}")
@@ -214,36 +149,23 @@ class ReportGenerator:
         if notes:
             import_info["notes"] = notes
 
-        # Generate report based on format
-        if output_format.lower() == "llm":
-            # Use LLM generator for llm.txt format
-            from .llm_generator import LLMGenerator
-            llm_gen = LLMGenerator(self.config)
-            return llm_gen.generate_llm_context(
-                job_ids=job_ids,
-                collection_name=collection_name,
-                start_time=start_time,
-                end_time=end_time,
-                output_file=output_file,
-                test_scenario=test_scenario,
-                notes=notes,
-                release_name=release_name,
-                milvus_namespace=milvus_namespace,
-                import_info_file=import_info_file,
-            )
-        else:
-            # Default to CSV format
-            self._write_csv_report(job_summaries, import_info, output_file)
-
-            return {
-                "jobs_analyzed": len(job_summaries),
-                "total_import_time": sum(
-                    s.get("total_time", 0) for s in job_summaries.values()
-                ),
-                "output_file": output_file,
-                "job_summaries": job_summaries,
-                "import_info": import_info,
-            }
+        # Generate report based on format (removed CSV, now use ReportAnalyzer)
+        from .llm_generator import ReportAnalyzer
+        analyzer = ReportAnalyzer(self.config, glm_api_key=glm_api_key, glm_model=glm_model)
+        
+        return analyzer.generate_report(
+            job_ids=job_ids,
+            collection_name=collection_name,
+            start_time=start_time,
+            end_time=end_time,
+            output_file=output_file,
+            output_format=output_format,
+            test_scenario=test_scenario,
+            notes=notes,
+            release_name=release_name,
+            milvus_namespace=milvus_namespace,
+            import_info_file=import_info_file,
+        )
 
     def _summarize_job(self, timing_data: list) -> dict[str, Any]:
         """Summarize timing data for a single job."""
@@ -515,210 +437,3 @@ class ReportGenerator:
         else:
             return size
 
-    def _write_csv_report(
-        self, job_summaries: dict, import_info: dict, output_file: str
-    ):
-        """Write CSV report with performance metrics."""
-        output_path = Path(output_file)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Get Prometheus metrics if available
-        prometheus_metrics = import_info.get("prometheus_metrics", {})
-        datanode_metrics = prometheus_metrics.get("datanode", {})
-        s3_metrics = prometheus_metrics.get("s3_minio", {})
-        binlog_metrics = prometheus_metrics.get("binlog", {})
-
-        with open(output_path, "w", newline="") as csvfile:
-            fieldnames = [
-                "Test Scenario",  # 测试场景
-                "Job ID",
-                "Collection Name",
-                "Total Rows",  # 总行数
-                "File Type",  # 文件类型
-                "Import Result",  # 导入结果
-                "Total Time (s)",  # 总耗时
-                "Pending Time (s)",  # 各阶段耗时
-                "Pre-Import Time (s)",
-                "Import Time (s)",
-                "Stats Time (s)",
-                "Build Index Time (s)",
-                "L0 Import Time (s)",
-                "Milvus Compute Pods Details",  # Milvus计算节点(DataNode/Standalone)每个pod详情
-                "MinIO Pods Details",  # MinIO每个pod详情
-                "File Count",
-                "Total File Size (GB)",
-                "Binlog Count",  # Binlog数量
-                "Binlog Size (GB)",  # Binlog大小
-                "Notes",  # 备注
-            ]
-
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-
-            for job_id, summary in job_summaries.items():
-                # Format DataNode pod details
-                datanode_details = self._format_datanode_details(datanode_metrics)
-
-                # Format MinIO pod details
-                minio_details = self._format_minio_details(s3_metrics)
-
-                # Use collection schema name if available, otherwise fall back to collection_name
-                collection_display_name = ""
-                if (
-                    "collection_schema" in import_info
-                    and "name" in import_info["collection_schema"]
-                ):
-                    collection_display_name = import_info["collection_schema"]["name"]
-                elif "collection_name" in import_info:
-                    collection_display_name = import_info["collection_name"]
-                else:
-                    collection_display_name = summary.get("collection_name", "")
-
-                row = {
-                    "Test Scenario": import_info.get("test_scenario", ""),
-                    "Job ID": job_id,
-                    "Collection Name": collection_display_name,
-                    "Total Rows": import_info.get("total_rows", 0),
-                    "File Type": import_info.get("file_type", ""),
-                    "Import Result": import_info.get("import_result", "success"),
-                    "Total Time (s)": f"{summary.get('total_time', 0):.2f}",
-                    "Pending Time (s)": f"{summary.get('phases', {}).get('start_to_execute', 0):.2f}",
-                    "Pre-Import Time (s)": f"{summary.get('phases', {}).get('preimport_done', 0):.2f}",
-                    "Import Time (s)": f"{summary.get('phases', {}).get('import_done', 0):.2f}",
-                    "Stats Time (s)": f"{summary.get('phases', {}).get('stats_done', 0):.2f}",
-                    "Build Index Time (s)": f"{summary.get('phases', {}).get('build_index_done', 0):.2f}",
-                    "L0 Import Time (s)": f"{summary.get('phases', {}).get('l0_import_done', 0):.6f}",
-                    "Milvus Compute Pods Details": datanode_details,
-                    "MinIO Pods Details": minio_details,
-                    "File Count": import_info["file_info"]["file_count"],
-                    "Total File Size (GB)": f"{import_info['file_info']['total_size'] / (1024**3):.2f}",
-                    "Binlog Count": binlog_metrics.get(
-                        "binlog_count", import_info["file_info"].get("binlog_count", 0)
-                    ),
-                    "Binlog Size (GB)": f"{binlog_metrics.get('binlog_size_gb', import_info['file_info'].get('binlog_size', 0) / (1024**3)):.2f}",
-                    "Notes": import_info.get("notes", ""),
-                }
-                writer.writerow(row)
-
-        self.logger.info(f"CSV report written to {output_path}")
-
-    def _format_datanode_details(self, datanode_metrics: dict[str, Any]) -> str:
-        """Format Milvus compute nodes (DataNode/Standalone) pod details for CSV display."""
-        if not datanode_metrics or not datanode_metrics.get("datanode_pods"):
-            return ""
-
-        details = []
-        use_time_range = datanode_metrics.get("datanode_pods", [{}])[0].get(
-            "use_time_range", False
-        )
-
-        for pod in datanode_metrics["datanode_pods"]:
-            pod_name = pod["pod_name"]
-            pod_details = []
-
-            for container in pod["containers"]:
-                if use_time_range and isinstance(container["memory_gb"], dict):
-                    # Time range format: min/avg/max with clear labels
-                    memory_str = f"mem(min:{container['memory_gb']['min']:.2f}/avg:{container['memory_gb']['avg']:.2f}/max:{container['memory_gb']['max']:.2f}GB)"
-                    cpu_str = f"cpu(min:{container['cpu_cores']['min']:.3f}/avg:{container['cpu_cores']['avg']:.3f}/max:{container['cpu_cores']['max']:.3f}cores)"
-                    container_info = (
-                        f"{container['container_name']}: {memory_str}, {cpu_str}"
-                    )
-                else:
-                    # Single value format
-                    container_info = f"{container['container_name']}: {container['memory_gb']:.2f}GB, {container['cpu_cores']:.3f}cores"
-                pod_details.append(container_info)
-
-            pod_summary = f"{pod_name}[{'; '.join(pod_details)}]"
-            details.append(pod_summary)
-
-        # Add summary
-        summary = datanode_metrics.get("summary", {})
-        if summary:
-            if (
-                use_time_range
-                and "memory_gb" in summary
-                and isinstance(summary["memory_gb"], dict)
-            ):
-                memory_summary = f"mem(min:{summary['memory_gb']['min']:.2f}/avg:{summary['memory_gb']['avg']:.2f}/max:{summary['memory_gb']['max']:.2f}GB)"
-                cpu_summary = f"cpu(min:{summary['cpu_cores']['min']:.3f}/avg:{summary['cpu_cores']['avg']:.3f}/max:{summary['cpu_cores']['max']:.3f}cores)"
-                summary_str = f"Summary: {memory_summary}, {cpu_summary}"
-            else:
-                summary_str = f"Summary: {summary.get('total_memory_gb', 0):.2f}GB, {summary.get('total_cpu_cores', 0):.3f}cores"
-            details.append(summary_str)
-
-        return " | ".join(details)
-
-    def _format_minio_details(self, s3_metrics: dict[str, Any]) -> str:
-        """Format MinIO pod details for CSV display."""
-        if not s3_metrics or not s3_metrics.get("minio_pods"):
-            return ""
-
-        details = []
-        use_time_range = s3_metrics.get("minio_pods", [{}])[0].get(
-            "use_time_range", False
-        )
-
-        for pod in s3_metrics["minio_pods"]:
-            pod_name = pod["pod_name"]
-            pod_details = []
-
-            for container in pod["containers"]:
-                if use_time_range and isinstance(container["total_iops"], dict):
-                    # Time range format: min/avg/max with clear labels
-                    iops_str = f"iops(min:{container['total_iops']['min']:.1f}/avg:{container['total_iops']['avg']:.1f}/max:{container['total_iops']['max']:.1f})"
-                    throughput_str = f"throughput(min:{container['total_throughput_mbps']['min']:.1f}/avg:{container['total_throughput_mbps']['avg']:.1f}/max:{container['total_throughput_mbps']['max']:.1f}MB/s)"
-                    container_info = (
-                        f"{container['container_name']}: {iops_str}, {throughput_str}"
-                    )
-                else:
-                    # Single value format
-                    container_info = f"{container['container_name']}: {container['total_iops']:.1f}iops, {container['total_throughput_mbps']:.1f}MB/s"
-                pod_details.append(container_info)
-
-            pod_summary = f"{pod_name}[{'; '.join(pod_details)}]"
-            details.append(pod_summary)
-
-        # Add summary
-        summary = s3_metrics.get("summary", {})
-        if summary:
-            if (
-                use_time_range
-                and "iops" in summary
-                and isinstance(summary["iops"], dict)
-            ):
-                iops_summary = f"iops(min:{summary['iops']['min']:.1f}/avg:{summary['iops']['avg']:.1f}/max:{summary['iops']['max']:.1f})"
-                throughput_summary = f"throughput(min:{summary['throughput_mbps']['min']:.1f}/avg:{summary['throughput_mbps']['avg']:.1f}/max:{summary['throughput_mbps']['max']:.1f}MB/s)"
-                summary_str = f"Summary: {iops_summary}, {throughput_summary}"
-            else:
-                summary_str = f"Summary: {summary.get('total_iops', 0):.1f}iops, {summary.get('total_throughput_mbps', 0):.1f}MB/s"
-            details.append(summary_str)
-
-        return " | ".join(details)
-
-    def _format_prometheus_metric(
-        self, metric_value, is_time_range: bool, unit: str = ""
-    ) -> str:
-        """Format Prometheus metric values for CSV output."""
-        if not metric_value:
-            return ""
-
-        if is_time_range and isinstance(metric_value, dict):
-            # Time range format: "min/avg/max unit"
-            min_val = metric_value.get("min", 0)
-            avg_val = metric_value.get("avg", 0)
-            max_val = metric_value.get("max", 0)
-
-            if unit:
-                return f"{min_val:.2f}/{avg_val:.2f}/{max_val:.2f} {unit}"
-            else:
-                return f"{min_val:.2f}/{avg_val:.2f}/{max_val:.2f}"
-        else:
-            # Single value format
-            if isinstance(metric_value, int | float):
-                if unit:
-                    return f"{metric_value:.2f} {unit}"
-                else:
-                    return f"{metric_value:.2f}"
-            else:
-                return str(metric_value)

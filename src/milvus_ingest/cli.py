@@ -1284,7 +1284,13 @@ def report() -> None:
 @click.option("--start-time", help="Start time (ISO format: 2024-01-01T10:00:00)")
 @click.option("--end-time", help="End time (ISO format: 2024-01-01T11:00:00)")
 @click.option(
-    "--output", "-o", default="/tmp/test_context.llm.txt", help="Output file path"
+    "--output", "-o", default="/tmp/import_analysis.md", help="Output file path"
+)
+@click.option(
+    "--format",
+    default="analysis",
+    type=click.Choice(["analysis", "raw"]),
+    help="Output format: analysis (GLM-powered) or raw (data only)"
 )
 @click.option("--loki-url", default="http://10.100.36.154:80", help="Loki server URL")
 @click.option(
@@ -1303,12 +1309,23 @@ def report() -> None:
 @click.option(
     "--import-info-file", help="Path to import_info.json file for additional metadata"
 )
+@click.option(
+    "--glm-api-key", 
+    envvar="GLM_API_KEY",
+    help="GLM API key for analysis (or set GLM_API_KEY env var)"
+)
+@click.option(
+    "--glm-model",
+    default="glm-4-flash",
+    help="GLM model to use (default: glm-4-flash)"
+)
 def generate_report(
     job_ids: tuple,
     collection_name: Optional[str],
     start_time: Optional[str],
     end_time: Optional[str],
     output: str,
+    format: str,
     loki_url: str,
     prometheus_url: str,
     pod_pattern: str,
@@ -1318,9 +1335,12 @@ def generate_report(
     release_name: Optional[str],
     milvus_namespace: Optional[str],
     import_info_file: Optional[str],
+    glm_api_key: Optional[str],
+    glm_model: str,
 ) -> None:
-    """Generate LLM context document for import analysis."""
+    """Generate import performance report with GLM analysis or raw data export."""
     from datetime import datetime, timedelta
+    from .report.models import ReportConfig
 
     # Parse time parameters
     end_dt = datetime.fromisoformat(end_time) if end_time else datetime.now()
@@ -1333,6 +1353,12 @@ def generate_report(
     # Convert job_ids tuple to list
     job_id_list = list(job_ids) if job_ids else None
 
+    # Check GLM API key for analysis format
+    if format == "analysis" and not glm_api_key:
+        click.echo("❌ GLM API key required for analysis format. Set GLM_API_KEY environment variable or use --glm-api-key option.")
+        click.echo("💡 Use --format raw to export raw data without analysis.")
+        raise click.Abort()
+
     # Create config
     config = ReportConfig(
         loki_url=loki_url,
@@ -1341,41 +1367,62 @@ def generate_report(
         start_time=start_dt,
         end_time=end_dt,
         timeout_seconds=timeout,
-        namespace=milvus_namespace
-        or "chaos-testing",  # Default to chaos-testing if not provided
+        namespace=milvus_namespace or "chaos-testing",
     )
 
-    # Generate report
-    click.echo(f"📊 Generating LLM context document with raw test data...")
+    # Display generation message
+    if format == "analysis":
+        click.echo(f"🤖 Generating GLM-powered analysis report...")
+        click.echo(f"   Model: {glm_model}")
+    else:
+        click.echo(f"📊 Generating raw data export...")
+    
     if job_id_list:
         click.echo(f"   Job IDs: {', '.join(job_id_list)}")
 
-    # Use LLMGenerator directly
-    from .report.llm_generator import LLMGenerator
+    # Use ReportGenerator
+    from .report.report_generator import ReportGenerator
     
-    llm_gen = LLMGenerator(config)
-    result = llm_gen.generate_llm_context(
-        job_ids=job_id_list,
-        collection_name=collection_name,
-        start_time=start_dt,
-        end_time=end_dt,
-        output_file=output,
-        test_scenario=test_scenario,
-        notes=notes,
-        release_name=release_name,
-        milvus_namespace=milvus_namespace,
-        import_info_file=import_info_file,
-    )
+    generator = ReportGenerator(config)
+    
+    try:
+        result = generator.generate_report(
+            job_ids=job_id_list,
+            collection_name=collection_name,
+            start_time=start_dt,
+            end_time=end_dt,
+            output_file=output,
+            output_format=format,
+            test_scenario=test_scenario,
+            notes=notes,
+            release_name=release_name,
+            milvus_namespace=milvus_namespace,
+            import_info_file=import_info_file,
+            glm_api_key=glm_api_key,
+            glm_model=glm_model,
+        )
 
-    # Display summary
-    click.echo(f"✅ LLM context document saved to: {output}")
-    click.echo(f"   Jobs analyzed: {result['jobs_analyzed']}")
-    click.echo(f"   Total log entries collected: {result['total_logs']}")
-    
-    if result['jobs_analyzed'] > 0 and job_id_list:
-        click.echo(f"\nAnalyzed job IDs:")
-        for job_id in job_id_list:
-            click.echo(f"   - {job_id}")
+        # Display success message
+        if format == "analysis":
+            click.echo(f"✅ Analysis report saved to: {output}")
+            if 'glm_model' in result:
+                click.echo(f"   GLM model used: {result['glm_model']}")
+        else:
+            click.echo(f"✅ Raw data exported to: {output}")
+        
+        click.echo(f"   Jobs analyzed: {result['jobs_analyzed']}")
+        click.echo(f"   Total log entries: {result['total_logs']}")
+        
+        if result['jobs_analyzed'] > 0 and job_id_list:
+            click.echo(f"\n📋 Analyzed job IDs:")
+            for job_id in job_id_list:
+                click.echo(f"   - {job_id}")
+
+    except Exception as e:
+        click.echo(f"❌ Report generation failed: {e}")
+        if format == "analysis":
+            click.echo("💡 Try --format raw to export raw data without GLM analysis.")
+        raise click.Abort()
 
 
 @to_milvus.command("import")

@@ -1,42 +1,57 @@
-"""LLM context generator for import analysis - generates llm.txt format."""
+"""Report analyzer for Milvus import performance - supports both raw data export and GLM-powered analysis."""
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ..logging_config import get_logger
 from .loki_collector import LokiDataCollector
 from .models import ReportConfig
 from .prometheus_collector import PrometheusCollector
+from .glm_analyzer import GLMAnalyzer
+from .report_templates import GLM_ANALYSIS_PROMPT, format_analysis_report
 
 
-class LLMGenerator:
-    """Generate LLM-friendly context documentation from import test data."""
+class ReportAnalyzer:
+    """Analyze Milvus import performance data with raw export or GLM-powered analysis."""
 
-    def __init__(self, config: ReportConfig):
-        """Initialize the LLM generator."""
+    def __init__(self, config: ReportConfig, glm_api_key: Optional[str] = None, glm_model: str = "glm-4-flash"):
+        """Initialize the report analyzer.
+        
+        Args:
+            config: Report configuration
+            glm_api_key: GLM API key for analysis (optional)
+            glm_model: GLM model to use (default: glm-4-flash)
+        """
         self.config = config
         self.logger = get_logger(__name__)
         self.loki_collector = LokiDataCollector(config)
         self.prometheus_collector = PrometheusCollector(config)
+        
+        # Initialize GLM analyzer if API key provided
+        self.glm_analyzer = None
+        if glm_api_key:
+            self.glm_analyzer = GLMAnalyzer(glm_api_key, glm_model)
+            self.logger.info(f"GLM analyzer initialized with model: {glm_model}")
 
-    def generate_llm_context(
+    def generate_report(
         self,
         job_ids: list[str] | None = None,
         collection_name: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
-        output_file: str = "/tmp/test_context.llm.txt",
+        output_file: str = "/tmp/import_report.md",
+        output_format: str = "analysis",
         test_scenario: str | None = None,
         notes: str | None = None,
         release_name: str | None = None,
         milvus_namespace: str | None = None,
         import_info_file: str | None = None,
     ) -> dict[str, Any]:
-        """Generate LLM context document.
+        """Generate performance report.
 
         Args:
             job_ids: List of job IDs for the import
@@ -44,6 +59,7 @@ class LLMGenerator:
             start_time: Start time for analysis
             end_time: End time for analysis
             output_file: Output file path
+            output_format: Output format ('analysis' for GLM analysis, 'raw' for raw data)
             test_scenario: Test scenario description
             notes: Additional notes
             release_name: Milvus release name
@@ -53,7 +69,7 @@ class LLMGenerator:
         Returns:
             Dictionary with generation summary
         """
-        self.logger.info(f"Generating LLM context document for jobs: {job_ids}")
+        self.logger.info(f"Generating {output_format} report for jobs: {job_ids}")
 
         # Collect all raw data
         raw_data = {
@@ -85,112 +101,107 @@ class LLMGenerator:
         self.logger.info("Collecting Loki logs...")
         if job_ids:
             for job_id in job_ids:
-                timing_data = self.loki_collector.collect_import_timing_data(
+                loki_data = self.loki_collector.collect_raw_logs(
                     job_id=job_id,
                     collection_name=collection_name,
                     start_time=start_time,
                     end_time=end_time,
                 )
-                for data in timing_data:
-                    raw_data["loki_logs"].append({
-                        "timestamp": data.timestamp.isoformat() if data.timestamp else None,
-                        "job_id": data.job_id,
-                        "collection_name": data.collection_name,
-                        "import_phase": data.import_phase,
-                        "time_cost": data.time_cost,
-                        "time_unit": data.time_unit,
-                        "message": data.message,
-                    })
+                raw_data["loki_logs"].extend(loki_data.get("logs", []))
         else:
-            timing_data = self.loki_collector.collect_import_timing_data(
+            loki_data = self.loki_collector.collect_raw_logs(
                 collection_name=collection_name,
                 start_time=start_time,
                 end_time=end_time,
             )
-            for data in timing_data:
-                raw_data["loki_logs"].append({
-                    "timestamp": data.timestamp.isoformat() if data.timestamp else None,
-                    "job_id": data.job_id,
-                    "collection_name": data.collection_name,
-                    "import_phase": data.import_phase,
-                    "time_cost": data.time_cost,
-                    "time_unit": data.time_unit,
-                    "message": data.message,
-                })
+            raw_data["loki_logs"].extend(loki_data.get("logs", []))
 
-        # Collect raw Prometheus metrics (direct API responses)
-        if release_name and milvus_namespace and start_time and end_time:
-            self.logger.info("Collecting raw Prometheus API responses...")
+        # Collect raw Prometheus metrics
+        if release_name and milvus_namespace:
+            self.logger.info("Collecting raw Prometheus metrics...")
             try:
-                # Store raw Prometheus query results
-                raw_data["prometheus_metrics"]["raw_queries"] = {}
-                
-                # Define queries to execute
-                queries = {
-                    # DataNode/Standalone memory usage
-                    "datanode_memory": f'container_memory_working_set_bytes{{cluster="", namespace="{milvus_namespace}", pod=~"{release_name}-milvus-.*", container!="", image!=""}}',
-                    
-                    # DataNode/Standalone CPU usage
-                    "datanode_cpu": f'rate(container_cpu_usage_seconds_total{{cluster="", namespace="{milvus_namespace}", pod=~"{release_name}-milvus-.*", container!="", image!=""}}[5m])',
-                    
-                    # MinIO container filesystem IOPS (since MinIO metrics may not be available)
-                    "minio_read_iops": f'rate(container_fs_reads_total{{container!="", cluster="", namespace="{milvus_namespace}", pod=~"{release_name}-minio-.*"}}[5m])',
-                    "minio_write_iops": f'rate(container_fs_writes_total{{container!="", cluster="", namespace="{milvus_namespace}", pod=~"{release_name}-minio-.*"}}[5m])',
-                    
-                    # MinIO container filesystem throughput  
-                    "minio_read_bytes": f'rate(container_fs_reads_bytes_total{{container!="", cluster="", namespace="{milvus_namespace}", pod=~"{release_name}-minio-.*"}}[5m])',
-                    "minio_write_bytes": f'rate(container_fs_writes_bytes_total{{container!="", cluster="", namespace="{milvus_namespace}", pod=~"{release_name}-minio-.*"}}[5m])',
-                    
-                    # Binlog metrics
-                    "binlog_count": f'milvus_datacoord_segment_binlog_file_count{{app_kubernetes_io_instance="{release_name}"}}',
-                    "binlog_size": f'milvus_datacoord_segment_binlog_file_size{{app_kubernetes_io_instance="{release_name}"}}',
-                }
-                
-                # Execute each query and store raw response
-                for query_name, query_string in queries.items():
-                    self.logger.info(f"Executing Prometheus query: {query_name}")
-                    try:
-                        # Use range query to get time series data
-                        response = self.prometheus_collector.query_prometheus_range(
-                            query_string, start_time, end_time
-                        )
-                        raw_data["prometheus_metrics"]["raw_queries"][query_name] = {
-                            "query": query_string,
-                            "response": response
-                        }
-                    except Exception as query_error:
-                        self.logger.warning(f"Failed to execute query {query_name}: {query_error}")
-                        raw_data["prometheus_metrics"]["raw_queries"][query_name] = {
-                            "query": query_string,
-                            "error": str(query_error)
-                        }
-                        
-                # Also store query metadata
-                raw_data["prometheus_metrics"]["query_metadata"] = {
-                    "release_name": release_name,
-                    "namespace": milvus_namespace,
-                    "start_time": start_time.isoformat(),
-                    "end_time": end_time.isoformat(),
-                    "prometheus_url": self.prometheus_collector.prometheus_url
-                }
+                prometheus_data = self.prometheus_collector.collect_raw_metrics(
+                    release_name=release_name,
+                    namespace=milvus_namespace,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                raw_data["prometheus_metrics"] = prometheus_data
                 
             except Exception as e:
                 self.logger.error(f"Error collecting Prometheus metrics: {e}")
                 raw_data["prometheus_metrics"]["error"] = str(e)
 
-        # Write raw data to file
-        self._write_raw_document(raw_data, output_file)
+        # Generate report based on format
+        if output_format.lower() == "analysis" and self.glm_analyzer:
+            return self._generate_analysis_report(raw_data, output_file)
+        else:
+            # Default to raw data export
+            return self._generate_raw_report(raw_data, output_file)
 
-        # Return summary
+    def _generate_analysis_report(self, raw_data: dict[str, Any], output_file: str) -> dict[str, Any]:
+        """Generate GLM-powered analysis report."""
+        try:
+            self.logger.info("Starting GLM analysis...")
+            
+            # Use raw data directly
+            raw_data_str = json.dumps(raw_data, default=str, indent=2)
+            self.logger.debug(f"Sending raw data to GLM: {len(raw_data_str)} characters")
+            
+            # Get analysis from GLM using raw data
+            analysis_result = self.glm_analyzer.analyze(raw_data, GLM_ANALYSIS_PROMPT)
+            
+            # Format the final report
+            formatted_report = format_analysis_report(analysis_result, raw_data)
+            
+            # Write analysis report to file
+            output_path = Path(output_file)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(formatted_report)
+            
+            self.logger.info(f"GLM analysis report written to {output_path}")
+            
+            return {
+                "jobs_analyzed": len(raw_data["metadata"]["job_ids"]) if raw_data["metadata"]["job_ids"] else 0,
+                "total_logs": len(raw_data["loki_logs"]),
+                "output_file": output_file,
+                "format": "analysis",
+                "glm_model": self.glm_analyzer.model,
+                "analysis_length": len(analysis_result),
+            }
+            
+        except Exception as e:
+            self.logger.error(f"GLM analysis failed: {e}")
+            self.logger.info("Falling back to raw data export...")
+            
+            # Fallback to raw data export
+            return self._generate_raw_report(raw_data, output_file.replace('.md', '_raw.json'))
+    
+    def _generate_raw_report(self, raw_data: dict[str, Any], output_file: str) -> dict[str, Any]:
+        """Generate raw data report."""
+        # For raw format, export as JSON
+        if output_file.endswith('.md'):
+            output_file = output_file.replace('.md', '.json')
+        
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(raw_data, f, indent=2, ensure_ascii=False, default=str)
+
+        self.logger.info(f"Raw data exported to {output_path}")
+        
         return {
-            "jobs_analyzed": len(job_ids) if job_ids else 0,
+            "jobs_analyzed": len(raw_data["metadata"]["job_ids"]) if raw_data["metadata"]["job_ids"] else 0,
             "total_logs": len(raw_data["loki_logs"]),
             "output_file": output_file,
-            "raw_data": raw_data,
+            "format": "raw",
         }
 
     def _write_raw_document(self, raw_data: dict[str, Any], output_file: str):
-        """Write the raw data document."""
+        """Write the raw data document (legacy method for compatibility)."""
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -236,3 +247,20 @@ class LLMGenerator:
             f.write("\n")
 
         self.logger.info(f"Raw data document written to {output_path}")
+    
+    def test_glm_connection(self) -> bool:
+        """Test GLM API connection."""
+        if not self.glm_analyzer:
+            self.logger.warning("GLM analyzer not initialized")
+            return False
+        
+        return self.glm_analyzer.test_connection()
+
+
+# Backward compatibility
+class LLMGenerator(ReportAnalyzer):
+    """Legacy class name for backward compatibility."""
+    
+    def generate_llm_context(self, **kwargs) -> dict[str, Any]:
+        """Legacy method for backward compatibility."""
+        return self.generate_report(output_format="raw", **kwargs)

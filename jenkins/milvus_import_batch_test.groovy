@@ -94,11 +94,11 @@ pipeline {
                     // Schema types to test - comprehensive coverage of all available schemas
                     def schemaTypes = [
                         // 'product_catalog',    // Simple product catalog with auto_id (4 fields, 128d)
-                        // 'ecommerce_search',   // E-commerce with nullable fields (5 fields, 256d)
-                        // 'news_articles',      // News with dynamic fields (4 fields, 768d)
-                        'document_search',    // Document search with sparse vectors + BM25 (5 fields, 768d)
-                        'multi_tenant_data',  // Multi-tenant with partitioning (5 fields, 256d)
-                        // 'multimedia_content'  // Multiple vector types + nullable fields (7 fields, 256d+384d+128d)
+                        // 'ecommerce_search',   // E-commerce product search with nullable fields (5 fields, 256d)
+                        // 'news_articles',      // News article storage with dynamic fields (4 fields, 768d)
+                        'document_search',    // Document search with sparse vectors and BM25 (5 fields, 768d)
+                        'multi_tenant_data',  // Multi-tenant customer support system with partitioning (5 fields, 256d)
+                        // 'multimedia_content'  // Multimedia content with multiple vector types and nullable fields (7 fields, 256d+384d+128d)
                     ]
                     
                     // File configurations - optimized for comprehensive testing without 10*10GB
@@ -175,6 +175,7 @@ pipeline {
                                             string(name: 'storage_version', value: scenario.storage),
                                             string(name: 'partition_count', value: scenario.partitions.toString()),
                                             string(name: 'shard_count', value: scenario.shards.toString()),
+                                            string(name: 'upload_method', value: 'mc_cli'),  // Default to mc_cli for batch tests
                                             booleanParam(name: 'keep_env', value: params.keep_env),
                                             booleanParam(name: 'generate_report', value: params.generate_reports),
                                             string(name: 'loki_url', value: params.loki_url),
