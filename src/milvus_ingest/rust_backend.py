@@ -424,3 +424,430 @@ def generate_float64_batch(
     if seed is not None:
         np.random.seed(seed)
     return np.random.uniform(min_val, max_val, num_rows)
+
+
+# =============================================================================
+# Faker Generation Functions (ported from synth-gen concepts)
+# =============================================================================
+
+
+def generate_faker_strings(
+    count: int,
+    faker_type: str,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate fake strings using the Rust faker module.
+
+    Args:
+        count: Number of strings to generate
+        faker_type: Type of fake data. Supported types:
+            - name, firstname, lastname: Person names
+            - email, username: Internet identifiers
+            - phone: Phone numbers
+            - address, city, country: Location data
+            - company, industry, jobtitle: Business data
+            - url, domain, ipv4: Network data
+            - useragent: Browser user agent strings
+            - uuid: Unique identifiers
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated fake strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_faker_strings(count, faker_type, seed)
+
+    # Python fallback - simple pattern-based generation
+    return [f"{faker_type}_{i}" for i in range(count)]
+
+
+def generate_categorical(
+    count: int,
+    categories: list[str],
+    weights: list[float],
+    seed: int | None = None,
+) -> list[str]:
+    """Generate categorical values from a weighted distribution.
+
+    Args:
+        count: Number of values to generate
+        categories: List of category strings
+        weights: List of weights (will be normalized to probabilities)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of selected categories
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_categorical(count, categories, weights, seed)
+
+    # Python fallback
+    total = sum(weights)
+    probs = [w / total for w in weights]
+    indices = np.random.choice(len(categories), size=count, p=probs)
+    return [categories[i] for i in indices]
+
+
+def generate_range_numbers(
+    count: int,
+    low: float,
+    high: float,
+    step: float | None = None,
+    seed: int | None = None,
+) -> list[float]:
+    """Generate range numbers with optional step.
+
+    Args:
+        count: Number of values to generate
+        low: Minimum value (inclusive)
+        high: Maximum value (exclusive)
+        step: Optional step size
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated numbers
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_range_numbers(count, low, high, step, seed)
+
+    # Python fallback
+    if seed is not None:
+        np.random.seed(seed)
+    values = np.random.uniform(low, high, count)
+    if step is not None and step > 0:
+        values = low + np.floor((values - low) / step) * step
+    return list(values)
+
+
+def generate_range_integers(
+    count: int,
+    low: int,
+    high: int,
+    step: int | None = None,
+    seed: int | None = None,
+) -> list[int]:
+    """Generate integers in a range with optional step.
+
+    Args:
+        count: Number of values to generate
+        low: Minimum value (inclusive)
+        high: Maximum value (exclusive)
+        step: Optional step size
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated integers
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_range_integers(count, low, high, step, seed)
+
+    # Python fallback
+    if seed is not None:
+        np.random.seed(seed)
+    step_val = step if step else 1
+    num_steps = (high - low) // step_val
+    step_indices = np.random.randint(0, max(1, num_steps), count)
+    return list(low + step_indices * step_val)
+
+
+def generate_frequency_bool(
+    count: int,
+    true_probability: float = 0.5,
+    seed: int | None = None,
+) -> list[bool]:
+    """Generate boolean values with specified true probability.
+
+    Args:
+        count: Number of values to generate
+        true_probability: Probability of generating true (0.0 to 1.0)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated booleans
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_frequency_bool(count, true_probability, seed)
+
+    # Python fallback
+    if seed is not None:
+        np.random.seed(seed)
+    return list(np.random.random(count) < true_probability)
+
+
+def generate_date_strings(
+    count: int,
+    start_year: int = 2020,
+    end_year: int = 2024,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate date strings in ISO format (YYYY-MM-DD).
+
+    Args:
+        count: Number of dates to generate
+        start_year: Start year (inclusive)
+        end_year: End year (inclusive)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of date strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_date_strings(count, start_year, end_year, seed)
+
+    # Python fallback
+    import random
+
+    if seed is not None:
+        random.seed(seed)
+    dates = []
+    for _ in range(count):
+        year = random.randint(start_year, end_year)
+        month = random.randint(1, 12)
+        day = random.randint(1, 28)  # Simplified
+        dates.append(f"{year:04d}-{month:02d}-{day:02d}")
+    return dates
+
+
+def generate_datetime_strings(
+    count: int,
+    start_year: int = 2020,
+    end_year: int = 2024,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate datetime strings in ISO format (YYYY-MM-DDTHH:MM:SS).
+
+    Args:
+        count: Number of datetimes to generate
+        start_year: Start year (inclusive)
+        end_year: End year (inclusive)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of datetime strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_datetime_strings(count, start_year, end_year, seed)
+
+    # Python fallback
+    import random
+
+    if seed is not None:
+        random.seed(seed)
+    datetimes = []
+    for _ in range(count):
+        year = random.randint(start_year, end_year)
+        month = random.randint(1, 12)
+        day = random.randint(1, 28)  # Simplified
+        hour = random.randint(0, 23)
+        minute = random.randint(0, 59)
+        second = random.randint(0, 59)
+        datetimes.append(
+            f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}"
+        )
+    return datetimes
+
+
+def generate_sequential_ids(
+    count: int,
+    prefix: str = "id",
+    start_index: int = 0,
+) -> list[str]:
+    """Generate unique IDs with prefix.
+
+    Args:
+        count: Number of IDs to generate
+        prefix: Prefix for the ID
+        start_index: Starting index
+
+    Returns:
+        List of generated IDs
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_sequential_ids(count, prefix, start_index)
+
+    # Python fallback
+    return [f"{prefix}_{start_index + i}" for i in range(count)]
+
+
+def list_faker_types() -> list[str]:
+    """List all available faker types.
+
+    Returns:
+        List of supported faker type strings
+    """
+    if _rust_module is not None:
+        return _rust_module.list_faker_types()
+
+    # Python fallback
+    return [
+        "name",
+        "firstname",
+        "lastname",
+        "email",
+        "username",
+        "phone",
+        "address",
+        "city",
+        "country",
+        "company",
+        "industry",
+        "jobtitle",
+        "url",
+        "domain",
+        "ipv4",
+        "useragent",
+        "uuid",
+        "word",
+        "sentence",
+        "paragraph",
+    ]
+
+
+# =============================================================================
+# Lorem Text Generation Functions
+# =============================================================================
+
+
+def generate_lorem_words(
+    count: int,
+    words_per_item: int = 1,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate Lorem Ipsum words.
+
+    Args:
+        count: Number of word items to generate
+        words_per_item: Number of words per item (default 1)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated word strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_lorem_words(count, words_per_item, seed)
+
+    # Python fallback - simple lorem vocabulary
+    lorem_words = [
+        "lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
+        "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
+        "incididunt", "ut", "labore", "et", "dolore", "magna", "aliqua",
+    ]
+    import random
+    if seed is not None:
+        random.seed(seed)
+    result = []
+    for _ in range(count):
+        words = [random.choice(lorem_words) for _ in range(words_per_item)]
+        result.append(" ".join(words))
+    return result
+
+
+def generate_lorem_sentences(
+    count: int,
+    word_count_min: int = 4,
+    word_count_max: int = 10,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate Lorem Ipsum sentences.
+
+    Args:
+        count: Number of sentences to generate
+        word_count_min: Minimum words per sentence (default 4)
+        word_count_max: Maximum words per sentence (default 10)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated sentences
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_lorem_sentences(
+            count, word_count_min, word_count_max, seed
+        )
+
+    # Python fallback
+    import random
+    if seed is not None:
+        random.seed(seed)
+    lorem_words = [
+        "lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
+        "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
+    ]
+    result = []
+    for _ in range(count):
+        word_count = random.randint(word_count_min, word_count_max)
+        words = [random.choice(lorem_words) for _ in range(word_count)]
+        words[0] = words[0].capitalize()
+        result.append(" ".join(words) + ".")
+    return result
+
+
+def generate_lorem_paragraphs(
+    count: int,
+    sentence_count_min: int = 3,
+    sentence_count_max: int = 6,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate Lorem Ipsum paragraphs.
+
+    Args:
+        count: Number of paragraphs to generate
+        sentence_count_min: Minimum sentences per paragraph (default 3)
+        sentence_count_max: Maximum sentences per paragraph (default 6)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated paragraphs
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_lorem_paragraphs(
+            count, sentence_count_min, sentence_count_max, seed
+        )
+
+    # Python fallback
+    import random
+    if seed is not None:
+        random.seed(seed)
+    result = []
+    for i in range(count):
+        sentence_count = random.randint(sentence_count_min, sentence_count_max)
+        sentences = generate_lorem_sentences(
+            sentence_count, seed=seed + i if seed else None
+        )
+        result.append(" ".join(sentences))
+    return result
+
+
+def generate_lorem_text(
+    count: int,
+    text_type: str = "sentence",
+    min_units: int = 4,
+    max_units: int = 10,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate Lorem Ipsum text with configurable type.
+
+    This is a flexible text generator for realistic-looking text.
+
+    Args:
+        count: Number of text items to generate
+        text_type: Type of text - "word", "sentence", "paragraph", "text"
+        min_units: Minimum units (words/sentences depending on type)
+        max_units: Maximum units
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of generated text strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_lorem_text(
+            count, text_type, min_units, max_units, seed
+        )
+
+    # Python fallback
+    text_type = text_type.lower()
+    if text_type in ("word", "words"):
+        return generate_lorem_words(count, max_units, seed)
+    elif text_type in ("paragraph", "paragraphs", "text"):
+        return generate_lorem_paragraphs(count, min_units, max_units, seed)
+    else:
+        return generate_lorem_sentences(count, min_units, max_units, seed)

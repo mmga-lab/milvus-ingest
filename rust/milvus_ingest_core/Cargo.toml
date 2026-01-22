@@ -35,6 +35,11 @@ indexmap = "2.7"
 # Lazy static initialization
 once_cell = "1.20"
 
+# Faker data generation (ported from synth-gen concepts)
+fake = { version = "2.9", features = ["derive"] }
+chrono = "0.4"
+uuid = { version = "1.11", features = ["v4"] }
+
 [profile.release]
 lto = true
 codegen-units = 1

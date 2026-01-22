@@ -2450,12 +2450,37 @@ def _generate_regular_scalar_data(
     Generate regular scalar field data without default value considerations.
 
     Args:
-        field: Field definition with type, constraints, and cardinality
+        field: Field definition with type, constraints, cardinality, and optional faker config
         num_rows: Number of rows to generate
         pk_offset: Offset for primary key generation
 
     Returns:
         Generated data as numpy array or list
+
+    Faker Configuration (optional):
+        When a field contains a "faker" key, high-performance Rust faker generation is used.
+        Example schema:
+        {
+            "name": "user_name",
+            "type": "VarChar",
+            "faker": {
+                "type": "name"  # or "email", "phone", "company", "city", etc.
+            }
+        }
+
+        Supported faker types: name, firstname, lastname, email, username, phone,
+        address, city, country, company, industry, jobtitle, url, domain, ipv4,
+        useragent, uuid
+
+    Categorical Configuration (optional):
+        {
+            "name": "status",
+            "type": "VarChar",
+            "categorical": {
+                "categories": ["active", "inactive", "pending"],
+                "weights": [70, 20, 10]
+            }
+        }
     """
     field_name = field["name"]
     field_type = field["type"]
@@ -2465,6 +2490,26 @@ def _generate_regular_scalar_data(
     max_val = field.get("max")
     cardinality_ratio = field.get("cardinality_ratio")
     enum_values = field.get("enum_values")
+
+    # Check for faker configuration (highest priority for string fields)
+    faker_config = field.get("faker")
+    if faker_config and field_type in ["VarChar", "String"]:
+        from milvus_ingest.rust_backend import generate_faker_strings
+
+        faker_type = faker_config.get("type", "name")
+        seed = faker_config.get("seed")
+        return generate_faker_strings(num_rows, faker_type, seed)
+
+    # Check for categorical configuration
+    categorical_config = field.get("categorical")
+    if categorical_config and field_type in ["VarChar", "String"]:
+        from milvus_ingest.rust_backend import generate_categorical
+
+        categories = categorical_config.get("categories", [])
+        weights = categorical_config.get("weights", [1.0] * len(categories))
+        seed = categorical_config.get("seed")
+        if categories:
+            return generate_categorical(num_rows, categories, weights, seed)
 
     # Handle enum values (highest priority)
     if enum_values:

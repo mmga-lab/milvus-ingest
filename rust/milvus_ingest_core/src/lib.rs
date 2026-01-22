@@ -6,6 +6,7 @@
 use pyo3::prelude::*;
 
 mod array;
+mod faker;
 mod json;
 mod text;
 mod vectors;
@@ -48,6 +49,23 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array::generate_int64_batch, m)?)?;
     m.add_function(wrap_pyfunction!(array::generate_float64_batch, m)?)?;
     m.add_function(wrap_pyfunction!(array::generate_float32_batch_2d, m)?)?;
+
+    // Faker generation functions (ported from synth-gen concepts)
+    m.add_function(wrap_pyfunction!(faker::generate_faker_strings, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_categorical, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_range_numbers, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_range_integers, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_frequency_bool, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_date_strings, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_datetime_strings, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_sequential_ids, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::list_faker_types, m)?)?;
+
+    // Lorem text generation functions
+    m.add_function(wrap_pyfunction!(faker::generate_lorem_words, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_lorem_sentences, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_lorem_paragraphs, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_lorem_text, m)?)?;
 
     // Utility functions
     m.add_function(wrap_pyfunction!(get_version, m)?)?;
