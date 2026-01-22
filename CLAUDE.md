@@ -6,23 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Environment Setup
 ```bash
-pdm install        # Install with development dependencies
-pdm install --prod # Install production dependencies only
+uv sync            # Install with development dependencies
+uv sync --no-dev   # Install production dependencies only
 ```
 
 ### Code Quality & Testing
 ```bash
 # Formatting & Linting (always run before commits)
-pdm run ruff format src tests   # Auto-format code
-pdm run ruff check src tests     # Lint checks
-pdm run mypy src                 # Type checking
+uv run ruff format src tests   # Auto-format code
+uv run ruff check src tests    # Lint checks
+uv run ty check src            # Type checking
 
 # Testing
-pdm run pytest                                    # Run all tests
-pdm run pytest --cov=src --cov-report=html       # With coverage report
-pdm run pytest -v -s                             # Verbose with output
-pdm run pytest -m "not slow"                     # Skip integration tests
-pdm run pytest tests/test_cli.py::test_specific  # Run specific test
+uv run pytest                                    # Run all tests
+uv run pytest --cov=src --cov-report=html       # With coverage report
+uv run pytest -v -s                             # Verbose with output
+uv run pytest -m "not slow"                     # Skip integration tests
+uv run pytest tests/test_cli.py::test_specific  # Run specific test
 
 # Makefile shortcuts (recommended)
 make lint          # Run ruff format + check + mypy
@@ -170,4 +170,3 @@ export MINIO_BUCKET=milvus-bucket
 - **Always run `make check`** before commits (runs lint + test)
 - **Type hints required** - enforced by mypy with strict settings
 - **Test coverage** - aim for >80% on new functionality
-- **Performance tests** in `bench/` directory for optimization work
