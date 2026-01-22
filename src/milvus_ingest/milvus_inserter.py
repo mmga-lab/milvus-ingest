@@ -158,7 +158,6 @@ class MilvusInserter:
             if show_progress:
                 print(f"📥 Inserting {data_file.name} ({total_rows:,} rows)...")
 
-            total_batches = (total_rows + batch_size - 1) // batch_size
             for i in range(0, total_rows, batch_size):
                 batch_num = i // batch_size + 1
 
@@ -408,18 +407,14 @@ class MilvusInserter:
 
         elif field_type in ["Float", "Double"]:
             # Convert to Python float
-            if isinstance(value, (float, np.floating)) or isinstance(
-                value, (int, np.integer)
-            ):
+            if isinstance(value, (float, np.floating, int, np.integer)):
                 return float(value)
             else:
                 return float(value) if value is not None else None
 
         elif field_type == "Bool":
             # Convert to Python bool
-            if isinstance(value, (bool, np.bool_)) or isinstance(
-                value, (int, np.integer)
-            ):
+            if isinstance(value, (bool, np.bool_, int, np.integer)):
                 return bool(value)
             else:
                 return bool(value) if value is not None else None

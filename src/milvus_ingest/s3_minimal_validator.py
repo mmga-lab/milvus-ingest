@@ -122,13 +122,12 @@ class S3MinimalValidator:
                     total_size += actual_file_size
 
                     # Validate file size if expected size is available
-                    if expected_file_size is not None:
-                        if actual_file_size != expected_file_size:
-                            results["valid"] = False
-                            results["errors"].append(
-                                f"File size mismatch in {file_name}: expected {expected_file_size} bytes, got {actual_file_size} bytes"
-                            )
-                            continue
+                    if expected_file_size is not None and actual_file_size != expected_file_size:
+                        results["valid"] = False
+                        results["errors"].append(
+                            f"File size mismatch in {file_name}: expected {expected_file_size} bytes, got {actual_file_size} bytes"
+                        )
+                        continue
 
                     valid_files += 1
 

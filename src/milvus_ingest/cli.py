@@ -374,10 +374,7 @@ def generate(
 
         # Calculate effective total rows for display
         # Check if both file_count and file_size are specified (rows will be calculated)
-        if file_count and file_size:
-            effective_display_rows = 0  # Will be calculated
-        else:
-            effective_display_rows = total_rows
+        effective_display_rows = 0 if file_count and file_size else total_rows
 
         # If both file_count and file_size are specified, estimate total rows for display
         if file_count and file_size and effective_display_rows == 0:

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyarrow.parquet as pq
 from rich.console import Console
 from rich.table import Table
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class MinimalValidator:
@@ -93,11 +95,9 @@ class MinimalValidator:
                 # Support both old and new format
                 if isinstance(file_info, str):
                     file_name = file_info
-                    expected_file_rows = None
                     expected_file_size = None
                 else:
                     file_name = file_info.get("file_name")
-                    expected_file_rows = file_info.get("rows")
                     expected_file_size = file_info.get("file_size_bytes")
 
                 file_path = self.output_dir / file_name
@@ -113,13 +113,12 @@ class MinimalValidator:
                     total_size += file_size
 
                     # Validate file size if expected size is available
-                    if expected_file_size is not None:
-                        if file_size != expected_file_size:
-                            results["valid"] = False
-                            results["errors"].append(
-                                f"File size mismatch in {file_name}: expected {expected_file_size} bytes, got {file_size} bytes"
-                            )
-                            continue
+                    if expected_file_size is not None and file_size != expected_file_size:
+                        results["valid"] = False
+                        results["errors"].append(
+                            f"File size mismatch in {file_name}: expected {expected_file_size} bytes, got {file_size} bytes"
+                        )
+                        continue
 
                     # Try to get row count based on format
                     if file_format.lower() == "parquet":
@@ -161,7 +160,7 @@ class MinimalValidator:
             parquet_file = pq.ParquetFile(file_path)
             return parquet_file.metadata.num_rows
         except Exception as e:
-            raise Exception(f"Cannot read parquet metadata: {e}")
+            raise Exception(f"Cannot read parquet metadata: {e}") from e
 
     def _get_json_row_count(self, file_path: Path) -> int:
         """Get row count from JSON Array file (Milvus bulk import format)."""
@@ -174,7 +173,7 @@ class MinimalValidator:
                     # Single JSON object (valid but uncommon for bulk import)
                     return 1
         except Exception as e:
-            raise Exception(f"Cannot read JSON file: {e}")
+            raise Exception(f"Cannot read JSON file: {e}") from e
 
     def display_results(self, results: dict[str, Any]) -> None:
         """Display validation results using Rich formatting."""

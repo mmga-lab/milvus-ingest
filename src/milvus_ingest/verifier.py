@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 from loguru import logger
-from pymilvus import MilvusClient
 from rich.console import Console
 from rich.table import Table
 
 from .exceptions import MilvusIngestError
 from .rich_display import display_error, display_info, display_success
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pymilvus import MilvusClient
 
 # Milvus has a hard limit on query results
 MILVUS_QUERY_LIMIT = 16_384
