@@ -62,14 +62,11 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
-    "mypy>=1.0.0",
+    "ty>=0.0.13",
     "twine>=6.1.0",
     "pytest-xdist>=3.8.0",
     "psutil>=7.0.0",
 ]
-
-[tool.pdm]
-distribution = true
 
 [tool.ruff]
 target-version = "py310"
@@ -88,25 +85,6 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
-
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["yaml", "pymilvus.*"]
-ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -129,5 +107,24 @@ exclude_dirs = ["tests"]
 skips = ["B101", "B601"]
 
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[dependency-groups]
+dev = [
+    "maturin>=1.11.5",
+]
+
+[tool.maturin]
+# Python source directory
+python-source = "src"
+# Rust extension module name (will be importable as milvus_ingest._rust)
+module-name = "milvus_ingest._rust"
+# Build features
+features = ["pyo3/extension-module"]
+# Rust crate location
+manifest-path = "rust/milvus_ingest_core/Cargo.toml"
+# Include Python files
+python-packages = ["milvus_ingest"]
+# Strip symbols for smaller binaries
+strip = true

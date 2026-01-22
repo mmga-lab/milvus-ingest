@@ -14,6 +14,20 @@ import pyarrow.parquet as pq
 from loguru import logger
 from ml_dtypes import bfloat16
 
+# Import Rust backend for high-performance data generation
+from milvus_ingest.rust_backend import (
+    USE_RUST,
+)
+from milvus_ingest.rust_backend import (
+    generate_bfloat16_vectors as rust_generate_bfloat16_vectors,
+)
+from milvus_ingest.rust_backend import (
+    generate_float16_vectors as rust_generate_float16_vectors,
+)
+from milvus_ingest.rust_backend import (
+    generate_sparse_vectors as rust_generate_sparse_vectors,
+)
+
 # Pure NumPy optimizations - consistently outperforms JIT for vector operations
 # Uses optimized BLAS libraries for multi-core CPU utilization
 # Note: Removed module-level debug log to avoid interfering with progress bars
@@ -316,7 +330,9 @@ def determine_generation_strategy(
             "batch_size": batch_size,
             "max_parallel_files": max_parallel,
             "memory_profile": memory_profile,
-            "optimization": "memory_aware" if file_size_gb >= 5 else "throughput_optimized",
+            "optimization": "memory_aware"
+            if file_size_gb >= 5
+            else "throughput_optimized",
             "file_size_gb": file_size_gb,
         }
 
@@ -385,7 +401,6 @@ def _find_primary_key_field(fields: list[dict[str, Any]]) -> dict[str, Any] | No
     return None
 
 
-
 def _calculate_partition_id(partition_key_value: Any, num_partitions: int) -> int:
     """Calculate partition ID based on partition key hash."""
     return hash(str(partition_key_value)) % num_partitions
@@ -421,10 +436,10 @@ def _parse_file_size(size_str: str) -> int:
         # If no unit, assume it's MB (for backward compatibility)
         try:
             return int(float(size_str) * 1024 * 1024)
-        except ValueError:
+        except ValueError as e:
             raise ValueError(
                 f"Invalid file size format: {size_str}. Use formats like '10GB', '200MB', or '256' (MB)"
-            )
+            ) from e
 
 
 def adjust_workers_by_strategy(
@@ -449,7 +464,6 @@ def adjust_workers_by_strategy(
     """
     strategy = strategy_info.get("strategy", "unknown")
     memory_profile = strategy_info.get("memory_profile", "medium")
-    optimization = strategy_info.get("optimization", "standard")
 
     file_size_gb = file_size_bytes / (1024**3)
     cpu_count = multiprocessing.cpu_count()
@@ -486,7 +500,6 @@ def adjust_workers_by_strategy(
 
         elif strategy == "batch_file_parallel":
             # For batch file processing: use batch-optimized workers
-            batch_size = strategy_info.get("batch_size", cpu_count)
             max_workers = strategy_info.get("max_parallel_files", cpu_count)
             adjusted_workers = min(num_workers, max_workers)
 
@@ -502,7 +515,9 @@ def adjust_workers_by_strategy(
         )
 
     # Additional memory safety warnings for multiple large files
-    total_memory_estimate_gb = file_size_gb * adjusted_workers * 1.4  # 1.4x for Python overhead
+    total_memory_estimate_gb = (
+        file_size_gb * adjusted_workers * 1.4
+    )  # 1.4x for Python overhead
     if total_memory_estimate_gb > 100:
         logger.warning(
             f"⚠️ High memory usage expected: ~{total_memory_estimate_gb:.0f}GB "
@@ -734,7 +749,6 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
         vector_fields = []
         scalar_fields = []
         partition_key_field = None
-        primary_key_field = None
 
         for field in fields:
             # Skip auto_id fields - they should not be generated
@@ -1032,43 +1046,73 @@ def _generate_single_file(file_info: dict[str, Any]) -> dict[str, Any]:
             elif field_type in ["Float16Vector", "BFloat16Vector"]:
                 if field_type == "Float16Vector":
                     # Generate float16 vectors using uint8 representation
-                    fp16_vectors = []
-                    for _ in range(current_batch_rows):
-                        raw_vector = np.random.random(dim)
-                        fp16_vector = (
-                            np.array(raw_vector, dtype=np.float16)
-                            .view(np.uint8)
-                            .tolist()
+                    if USE_RUST:
+                        # Use Rust for high-performance generation
+                        uint8_data = rust_generate_float16_vectors(
+                            current_batch_rows, dim, seed=seed
                         )
-                        fp16_vectors.append(fp16_vector)
-                    data[field_name] = fp16_vectors
+                        data[field_name] = [row.tolist() for row in uint8_data]
+                    else:
+                        # Python fallback
+                        fp16_vectors = []
+                        for _ in range(current_batch_rows):
+                            raw_vector = np.random.random(dim)
+                            fp16_vector = (
+                                np.array(raw_vector, dtype=np.float16)
+                                .view(np.uint8)
+                                .tolist()
+                            )
+                            fp16_vectors.append(fp16_vector)
+                        data[field_name] = fp16_vectors
                 else:  # BFloat16Vector
                     # Generate bfloat16 vectors using uint8 representation
-                    bf16_vectors = []
-                    for _ in range(current_batch_rows):
-                        raw_vector = np.random.random(dim)
-                        bf16_vector = (
-                            np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
+                    if USE_RUST:
+                        # Use Rust for high-performance generation
+                        uint8_data = rust_generate_bfloat16_vectors(
+                            current_batch_rows, dim, seed=seed
                         )
-                        bf16_vectors.append(bf16_vector)
-                    data[field_name] = bf16_vectors
+                        data[field_name] = [row.tolist() for row in uint8_data]
+                    else:
+                        # Python fallback
+                        bf16_vectors = []
+                        for _ in range(current_batch_rows):
+                            raw_vector = np.random.random(dim)
+                            bf16_vector = (
+                                np.array(raw_vector, dtype=bfloat16)
+                                .view(np.uint8)
+                                .tolist()
+                            )
+                            bf16_vectors.append(bf16_vector)
+                        data[field_name] = bf16_vectors
 
             elif field_type == "SparseFloatVector":
                 # Generate sparse float vectors as dict with indices as keys and values as floats
-                sparse_vectors = []
-                for _ in range(current_batch_rows):
-                    max_dim = 1000
-                    non_zero_count = np.random.randint(
-                        10, max_dim // 10
-                    )  # 10-100 non-zero values
-                    indices = np.random.choice(max_dim, non_zero_count, replace=False)
-                    values = np.random.random(non_zero_count)
-                    sparse_vector = {
-                        str(index): float(value)
-                        for index, value in zip(indices, values, strict=False)
-                    }
-                    sparse_vectors.append(sparse_vector)
-                data[field_name] = sparse_vectors
+                if USE_RUST:
+                    # Use Rust for high-performance generation
+                    data[field_name] = rust_generate_sparse_vectors(
+                        current_batch_rows,
+                        max_dim=1000,
+                        density_min=0.01,
+                        density_max=0.1,
+                        seed=seed,
+                    )
+                else:
+                    sparse_vectors = []
+                    for _ in range(current_batch_rows):
+                        max_dim = 1000
+                        non_zero_count = np.random.randint(
+                            10, max_dim // 10
+                        )  # 10-100 non-zero values
+                        indices = np.random.choice(
+                            max_dim, non_zero_count, replace=False
+                        )
+                        values = np.random.random(non_zero_count)
+                        sparse_vector = {
+                            str(index): float(value)
+                            for index, value in zip(indices, values, strict=False)
+                        }
+                        sparse_vectors.append(sparse_vector)
+                    data[field_name] = sparse_vectors
 
         # Generate dynamic fields if enabled
         if enable_dynamic and dynamic_fields:
@@ -2197,9 +2241,7 @@ def _optimize_parquet_columns(
         return df, {}
 
     if disable_optimization:
-        logger.debug(
-            "Column optimization disabled - ensuring schema consistency"
-        )
+        logger.debug("Column optimization disabled - ensuring schema consistency")
         return df, {}
 
     optimization_info = {}
@@ -3071,43 +3113,73 @@ def generate_data_optimized(
             elif field_type in ["Float16Vector", "BFloat16Vector"]:
                 if field_type == "Float16Vector":
                     # Generate float16 vectors using uint8 representation
-                    fp16_vectors = []
-                    for _ in range(current_batch_rows):
-                        raw_vector = np.random.random(dim)
-                        fp16_vector = (
-                            np.array(raw_vector, dtype=np.float16)
-                            .view(np.uint8)
-                            .tolist()
+                    if USE_RUST:
+                        # Use Rust for high-performance generation
+                        uint8_data = rust_generate_float16_vectors(
+                            current_batch_rows, dim, seed=seed
                         )
-                        fp16_vectors.append(fp16_vector)
-                    data[field_name] = fp16_vectors
+                        data[field_name] = [row.tolist() for row in uint8_data]
+                    else:
+                        # Python fallback
+                        fp16_vectors = []
+                        for _ in range(current_batch_rows):
+                            raw_vector = np.random.random(dim)
+                            fp16_vector = (
+                                np.array(raw_vector, dtype=np.float16)
+                                .view(np.uint8)
+                                .tolist()
+                            )
+                            fp16_vectors.append(fp16_vector)
+                        data[field_name] = fp16_vectors
                 else:  # BFloat16Vector
                     # Generate bfloat16 vectors using uint8 representation
-                    bf16_vectors = []
-                    for _ in range(current_batch_rows):
-                        raw_vector = np.random.random(dim)
-                        bf16_vector = (
-                            np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
+                    if USE_RUST:
+                        # Use Rust for high-performance generation
+                        uint8_data = rust_generate_bfloat16_vectors(
+                            current_batch_rows, dim, seed=seed
                         )
-                        bf16_vectors.append(bf16_vector)
-                    data[field_name] = bf16_vectors
+                        data[field_name] = [row.tolist() for row in uint8_data]
+                    else:
+                        # Python fallback
+                        bf16_vectors = []
+                        for _ in range(current_batch_rows):
+                            raw_vector = np.random.random(dim)
+                            bf16_vector = (
+                                np.array(raw_vector, dtype=bfloat16)
+                                .view(np.uint8)
+                                .tolist()
+                            )
+                            bf16_vectors.append(bf16_vector)
+                        data[field_name] = bf16_vectors
 
             elif field_type == "SparseFloatVector":
                 # Generate sparse float vectors as dict with indices as keys and values as floats
-                sparse_vectors = []
-                for _ in range(current_batch_rows):
-                    max_dim = 1000
-                    non_zero_count = np.random.randint(
-                        10, max_dim // 10
-                    )  # 10-100 non-zero values
-                    indices = np.random.choice(max_dim, non_zero_count, replace=False)
-                    values = np.random.random(non_zero_count)
-                    sparse_vector = {
-                        str(index): float(value)
-                        for index, value in zip(indices, values, strict=False)
-                    }
-                    sparse_vectors.append(sparse_vector)
-                data[field_name] = sparse_vectors
+                if USE_RUST:
+                    # Use Rust for high-performance generation
+                    data[field_name] = rust_generate_sparse_vectors(
+                        current_batch_rows,
+                        max_dim=1000,
+                        density_min=0.01,
+                        density_max=0.1,
+                        seed=seed,
+                    )
+                else:
+                    sparse_vectors = []
+                    for _ in range(current_batch_rows):
+                        max_dim = 1000
+                        non_zero_count = np.random.randint(
+                            10, max_dim // 10
+                        )  # 10-100 non-zero values
+                        indices = np.random.choice(
+                            max_dim, non_zero_count, replace=False
+                        )
+                        values = np.random.random(non_zero_count)
+                        sparse_vector = {
+                            str(index): float(value)
+                            for index, value in zip(indices, values, strict=False)
+                        }
+                        sparse_vectors.append(sparse_vector)
+                    data[field_name] = sparse_vectors
 
         # Generate dynamic fields if enabled
         if enable_dynamic and dynamic_fields:

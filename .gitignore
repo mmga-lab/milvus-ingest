@@ -106,3 +106,4 @@ dmypy.json
 
 # milvus volume
 deploy/volumes
+rust/milvus_ingest_core/target/
