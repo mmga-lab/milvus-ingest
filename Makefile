@@ -5,32 +5,32 @@ help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 install:  ## Install the package
-	pdm install --prod
+	uv sync --no-dev
 
 install-dev:  ## Install development dependencies
-	pdm install
+	uv sync
 
 format:  ## Format code with ruff
-	pdm run ruff format src tests
+	uv run ruff format src tests
 
 format-check:  ## Check code formatting without making changes
-	pdm run ruff format --check src tests
+	uv run ruff format --check src tests
 
 lint:  ## Run linting checks
-	pdm run ruff check src tests
-	pdm run mypy src
+	uv run ruff check src tests
+	uv run ty check src
 
 test:  ## Run tests
-	pdm run pytest
+	uv run pytest
 
 test-cov:  ## Run tests with coverage
-	pdm run pytest --cov=src --cov-report=term-missing --cov-report=html --cov-report=xml
+	uv run pytest --cov=src --cov-report=term-missing --cov-report=html --cov-report=xml
 
 security:  ## Run security checks
-	pdm add --dev safety pip-audit bandit[toml]
-	pdm run safety check
-	pdm run pip-audit
-	pdm run bandit -r src/
+	uv add --dev safety pip-audit bandit[toml]
+	uv run safety check
+	uv run pip-audit
+	uv run bandit -r src/
 
 clean:  ## Clean build artifacts
 	rm -rf build/
@@ -43,9 +43,9 @@ clean:  ## Clean build artifacts
 	find . -type f -name "*.pyc" -delete
 
 build:  ## Build the package
-	pdm build
+	uv build
 
-publish:  ## Publish to PyPI (requires PDM_PUBLISH_TOKEN)
-	pdm publish
+publish:  ## Publish to PyPI (requires UV_PUBLISH_TOKEN or TWINE credentials)
+	uv publish
 
 check: lint test  ## Run all checks (lint + test)
