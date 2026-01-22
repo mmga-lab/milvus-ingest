@@ -8,19 +8,19 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 from loguru import logger
+from pymilvus.exceptions import MilvusException
 from rich.console import Console
 from rich.table import Table
 
+from .constants import MILVUS_QUERY_LIMIT
 from .exceptions import MilvusIngestError
+from .json_utils import JsonLoadError, load_json_sample
 from .rich_display import display_error, display_info, display_success
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from pymilvus import MilvusClient
-
-# Milvus has a hard limit on query results
-MILVUS_QUERY_LIMIT = 16_384
 
 
 class MilvusVerifier:
@@ -86,7 +86,7 @@ class MilvusVerifier:
                 if len(batch_results) < batch_size:
                     break
 
-            except Exception as e:
+            except MilvusException as e:
                 logger.error(f"Batch query failed at offset {offset}: {e}")
                 raise
 
@@ -344,7 +344,7 @@ class MilvusVerifier:
                 output_fields=["*"],
                 total_limit=query_limit,
             )
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"Failed to query Milvus data: {e}")
             return False
 
@@ -387,7 +387,7 @@ class MilvusVerifier:
                 return self._verify_fields_with_index_alignment(
                     source_lookup, milvus_lookup, sample_count, exclude_vectors
                 )
-            except Exception as e:
+            except MilvusException as e:
                 display_error(f"Failed to query Milvus data: {e}")
                 return False
 
@@ -445,7 +445,7 @@ class MilvusVerifier:
                     )
                     milvus_data.extend(chunk_results)
 
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"Failed to query Milvus data: {e}")
             return False
 
@@ -784,7 +784,7 @@ class MilvusVerifier:
 
             # Default string comparison
             return str(source_value) == str(milvus_value)
-        except Exception as e:
+        except (TypeError, ValueError, AttributeError) as e:
             logger.debug(
                 f"Error comparing values: {e}, source_type={type(source_value)}, milvus_type={type(milvus_value)}"
             )
@@ -872,7 +872,7 @@ class MilvusVerifier:
                 output_fields=[pk_field],
                 total_limit=sample_size,
             )
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"Failed to sample data for exact queries: {e}")
             return False
 
@@ -897,7 +897,7 @@ class MilvusVerifier:
                 )
                 if len(query_result) == 1 and query_result[0][pk_field] == pk_value:
                     passed += 1
-            except Exception as e:
+            except MilvusException as e:
                 logger.debug(f"Exact query failed for {pk_value}: {e}")
 
         success_rate = passed / len(sample_data) if sample_data else 0
@@ -940,7 +940,7 @@ class MilvusVerifier:
                 output_fields=[field_name, pk_field],
                 total_limit=sample_size,
             )
-        except Exception as e:
+        except MilvusException as e:
             # If we can't retrieve the vector field, it might be sparse or have retrieval restrictions
             if "not allowed to retrieve raw data" in str(e):
                 display_info(
@@ -976,7 +976,7 @@ class MilvusVerifier:
 
                 if found_self:
                     passed += 1
-            except Exception as e:
+            except MilvusException as e:
                 logger.debug(f"Vector search failed: {e}")
 
         recall_rate = passed / len(sample_data) if sample_data else 0
@@ -1026,7 +1026,7 @@ class MilvusVerifier:
             display_success(f"✓ Nullable fields verified: {null_counts}")
             return True
 
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"✗ Nullable field verification failed: {e}")
             return False
 
@@ -1067,7 +1067,7 @@ class MilvusVerifier:
 
             return True
 
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"✗ Dynamic field verification failed: {e}")
             return False
 
@@ -1114,7 +1114,7 @@ class MilvusVerifier:
 
             return True
 
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"✗ Partition key verification failed: {e}")
             return False
 
@@ -1149,7 +1149,7 @@ class MilvusVerifier:
 
             return True
 
-        except Exception as e:
+        except MilvusException as e:
             display_error(f"✗ Function field verification failed: {e}")
             return False
 
@@ -1232,7 +1232,7 @@ class MilvusVerifier:
 
             return True
 
-        except Exception as e:
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError) as e:
             logger.debug(f"Sparse vector comparison error: {e}")
             return False
 
@@ -1288,42 +1288,24 @@ class MilvusVerifier:
 
             return []
 
-        except Exception as e:
+        except (OSError, pd.errors.ParquetError, JsonLoadError) as e:
             logger.debug(f"Failed to load source data: {e}")
             return []
 
     def _read_json_sample(
         self, json_path: Path, sample_size: int
     ) -> list[dict[str, Any]]:
-        """Read sample data from JSON file."""
-        import json
+        """Read sample data from JSON file.
 
+        Uses shared JSON loading utility that handles multiple formats:
+        - JSON array: [{"field": "value"}, ...]
+        - Legacy Milvus: {"rows": [...]}
+        - Single object: {"field": "value"}
+        - JSONL: one JSON object per line
+        """
         try:
-            with open(json_path, encoding="utf-8") as f:
-                content = f.read().strip()
-
-            data_list = []
-            if content.startswith("["):
-                # JSON array format (list of dict) - Milvus bulk import format
-                data_list = json.loads(content)
-            elif content.startswith("{"):
-                # Check if it's legacy format with "rows" key or single object
-                data = json.loads(content)
-                if "rows" in data and isinstance(data["rows"], list):
-                    # Legacy Milvus bulk import format: {"rows": [...]}
-                    data_list = data["rows"]
-                else:
-                    # Single object - wrap in list
-                    data_list = [data]
-            else:
-                # Try line-delimited JSON
-                lines = content.strip().split("\n")
-                data_list = [json.loads(line) for line in lines if line.strip()]
-
-            # Return sample
-            return data_list[:sample_size]
-
-        except Exception as e:
+            return load_json_sample(json_path, sample_size)
+        except (JsonLoadError, FileNotFoundError) as e:
             logger.debug(f"Failed to read JSON file {json_path}: {e}")
             return []
 

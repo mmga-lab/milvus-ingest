@@ -9,6 +9,7 @@ from typing import Any
 
 from pymilvus import MilvusClient
 from pymilvus.bulk_writer import bulk_import, get_import_progress, list_import_jobs
+from pymilvus.exceptions import ConnectError, MilvusException
 from rich.console import Console
 
 from .logging_config import get_logger
@@ -47,7 +48,7 @@ class MilvusBulkImporter:
             # Initialize schema builder
             self.schema_builder = MilvusSchemaBuilder(self.client)
             self.logger.info(f"Connected to Milvus at {uri}")
-        except Exception as e:
+        except (ConnectError, MilvusException) as e:
             self.logger.error(f"Failed to connect to Milvus: {e}")
             raise
 
@@ -126,7 +127,7 @@ class MilvusBulkImporter:
                             file_metadata: dict[str, Any] = json.load(f)
                         self.logger.info(f"Found metadata in {meta_path}")
                         return file_metadata
-            except Exception as e:
+            except (OSError, json.JSONDecodeError, KeyError) as e:
                 self.logger.debug(f"Failed to load metadata from {file_path}: {e}")
 
         return None
@@ -263,7 +264,7 @@ class MilvusBulkImporter:
                         self.logger.info(f"  Files in batch: {len(batch_files)}")
                         break  # Success, exit retry loop
 
-                    except Exception as e:
+                    except MilvusException as e:
                         if retry_count < max_retries - 1:
                             self.logger.warning(f"Batch {batch_idx} failed, retrying in 5 seconds... Error: {e}")
                             time.sleep(5)
@@ -281,7 +282,7 @@ class MilvusBulkImporter:
 
             return job_ids
 
-        except Exception as e:
+        except (MilvusException, ValueError) as e:
             self.logger.error(f"Failed to start bulk import: {e}")
             self.logger.error(f"Collection: {collection_name}")
             self.logger.error(f"Files: {files}")
@@ -365,7 +366,7 @@ class MilvusBulkImporter:
                         reason = job_info.get("reason", "Unknown error")
                         self.logger.error(f"❌ Job {job_id} failed: {reason}")
 
-                except Exception as e:
+                except MilvusException as e:
                     self.logger.error(f"Failed to get status for job {job_id}: {e}")
 
             # Log progress every 10 seconds
@@ -576,7 +577,7 @@ class MilvusBulkImporter:
 
             return jobs
 
-        except Exception as e:
+        except MilvusException as e:
             self.logger.error(f"Failed to list import jobs: {e}")
             self.logger.error(f"URI: {self.uri}")
             if collection_name:

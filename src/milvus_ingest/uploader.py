@@ -15,8 +15,9 @@ if TYPE_CHECKING:
 import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
+from .exceptions import S3UploadError
 from .logging_config import get_logger
 from .rich_display import display_error, display_info
 from .s3_minimal_validator import S3MinimalValidator
@@ -155,9 +156,9 @@ class S3Uploader:
                     else ("AWS CLI" if self.use_aws_cli else "boto3"),
                 },
             )
-        except Exception as e:
+        except (ClientError, NoCredentialsError, BotoCoreError, OSError) as e:
             self.logger.error(f"Failed to initialize S3 client: {e}")
-            raise
+            raise S3UploadError(f"Failed to initialize S3 client: {e}") from e
 
     def _get_transfer_config(self, file_size: int) -> TransferConfig:
         """Get appropriate TransferConfig based on file size.
@@ -289,7 +290,7 @@ class S3Uploader:
                             "details": upload_result,
                         }
                     )
-            except Exception as e:
+            except (ClientError, BotoCoreError, OSError, subprocess.SubprocessError) as e:
                 self.logger.error(f"Failed to upload {file_path}: {e}")
                 failed_files.append({"file": str(file_path), "error": str(e)})
 
@@ -316,7 +317,7 @@ class S3Uploader:
                     display_error("S3 validation failed. See errors above.")
                 else:
                     self.logger.info("S3 validation passed")
-            except Exception as e:
+            except (ClientError, BotoCoreError, ValueError) as e:
                 self.logger.error(f"Failed to validate S3 uploads: {e}")
                 validation_results = {
                     "valid": False,
@@ -329,7 +330,7 @@ class S3Uploader:
             try:
                 file_list_info = self._list_s3_files(bucket, prefix)
                 self._display_file_list(file_list_info, bucket, prefix)
-            except Exception as e:
+            except (ClientError, BotoCoreError) as e:
                 self.logger.error(f"Failed to list S3 files: {e}")
 
         return {
@@ -371,7 +372,7 @@ class S3Uploader:
                         else:
                             self.s3_client.create_bucket(Bucket=bucket)
                     self.logger.info(f"Created bucket '{bucket}'")
-                except Exception as create_error:
+                except ClientError as create_error:
                     self.logger.error(
                         f"Failed to create bucket '{bucket}': {create_error}"
                     )
@@ -509,9 +510,9 @@ class S3Uploader:
                 )
             self.logger.error(f"Failed to upload {file_path}: {e}")
             raise
-        except Exception as e:
+        except (BotoCoreError, OSError, ValueError) as e:
             self.logger.error(f"Failed to upload {file_path}: {e}")
-            raise
+            raise S3UploadError(f"Failed to upload {file_path}: {e}") from e
 
         return result
 
@@ -629,10 +630,10 @@ class S3Uploader:
 
         except subprocess.TimeoutExpired:
             process.kill()
-            raise RuntimeError(f"AWS CLI upload timed out for {file_path}") from None
-        except Exception as e:
+            raise S3UploadError(f"AWS CLI upload timed out for {file_path}") from None
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
             self.logger.error(f"Failed to upload {file_path} with AWS CLI: {e}")
-            raise
+            raise S3UploadError(f"Failed to upload {file_path}: {e}") from e
 
         return result
 
@@ -711,7 +712,7 @@ class S3Uploader:
                     f"Size mismatch - Local: {upload_info['local_size']}, Remote: {result['remote_size']}"
                 )
 
-        except Exception as e:
+        except (ClientError, BotoCoreError) as e:
             self.logger.error(f"Failed to verify upload integrity: {e}")
 
         return result
@@ -754,7 +755,7 @@ class S3Uploader:
                     "AWS CLI not found and automatic installation failed. "
                     "Please install manually with: pip install awscli --upgrade --user"
                 ) from None
-        except Exception as e:
+        except (subprocess.SubprocessError, RuntimeError) as e:
             raise RuntimeError(f"Failed to verify AWS CLI: {e}") from e
 
     def _install_aws_cli(self) -> bool:
@@ -789,7 +790,7 @@ class S3Uploader:
         except subprocess.TimeoutExpired:
             self.logger.error("AWS CLI installation timed out")
             return False
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             self.logger.error(f"Failed to install AWS CLI: {e}")
             return False
 
@@ -837,7 +838,7 @@ class S3Uploader:
             self.logger.error("All installation attempts failed")
             return False
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             self.logger.error(f"Alternative installation failed: {e}")
             return False
 
@@ -912,7 +913,7 @@ class S3Uploader:
                 "  - AWS credentials file (~/.aws/credentials)"
             )
             return False
-        except Exception as e:
+        except (ClientError, BotoCoreError) as e:
             display_error(f"Failed to connect to S3: {e}")
             return False
 
@@ -946,7 +947,7 @@ class S3Uploader:
                     "mc CLI not found and automatic installation failed. "
                     "Please install manually from https://min.io/docs/minio/linux/reference/minio-mc.html"
                 ) from None
-        except Exception as e:
+        except (subprocess.SubprocessError, RuntimeError) as e:
             raise RuntimeError(f"Failed to verify mc CLI: {e}") from e
 
     def _install_mc_cli(self) -> bool:
@@ -1003,7 +1004,7 @@ class S3Uploader:
 
             try:
                 urllib.request.urlretrieve(mc_url, str(mc_path))
-            except Exception as e:
+            except OSError as e:
                 self.logger.error(f"Failed to download mc: {e}")
                 return False
 
@@ -1029,7 +1030,7 @@ class S3Uploader:
             display_info("✅ mc CLI installed successfully")
             return True
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.logger.error(f"Failed to install mc CLI: {e}")
             return False
 
@@ -1070,7 +1071,7 @@ class S3Uploader:
 
             self.logger.info(f"mc alias '{self.mc_alias}' configured successfully")
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError, RuntimeError) as e:
             self.logger.error(f"Failed to configure mc alias: {e}")
             raise
 
@@ -1162,10 +1163,10 @@ class S3Uploader:
                 raise ValueError(f"Upload integrity validation failed for {file_path}")
 
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f"mc upload timed out for {file_path}") from None
-        except Exception as e:
+            raise S3UploadError(f"mc upload timed out for {file_path}") from None
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
             self.logger.error(f"Failed to upload {file_path} with mc: {e}")
-            raise
+            raise S3UploadError(f"Failed to upload {file_path}: {e}") from e
 
         return result
 
@@ -1201,7 +1202,7 @@ class S3Uploader:
             files.sort(key=lambda x: x["key"])
             return files
 
-        except Exception as e:
+        except (ClientError, BotoCoreError) as e:
             self.logger.error(f"Failed to list S3 files: {e}")
             raise
 
