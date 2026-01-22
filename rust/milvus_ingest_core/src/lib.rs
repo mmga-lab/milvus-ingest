@@ -58,8 +58,15 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(faker::generate_frequency_bool, m)?)?;
     m.add_function(wrap_pyfunction!(faker::generate_date_strings, m)?)?;
     m.add_function(wrap_pyfunction!(faker::generate_datetime_strings, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_timestamptz_strings, m)?)?;
     m.add_function(wrap_pyfunction!(faker::generate_sequential_ids, m)?)?;
     m.add_function(wrap_pyfunction!(faker::list_faker_types, m)?)?;
+
+    // Geometry (WKT) generation functions
+    m.add_function(wrap_pyfunction!(faker::generate_wkt_points, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_wkt_linestrings, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_wkt_polygons, m)?)?;
+    m.add_function(wrap_pyfunction!(faker::generate_wkt_geometries, m)?)?;
 
     // Lorem text generation functions
     m.add_function(wrap_pyfunction!(faker::generate_lorem_words, m)?)?;

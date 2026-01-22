@@ -647,6 +647,83 @@ def generate_datetime_strings(
     return datetimes
 
 
+def generate_timestamptz_strings(
+    count: int,
+    start_year: int = 2020,
+    end_year: int = 2024,
+    timezone_offset_hours: int | None = None,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate TIMESTAMPTZ strings in ISO 8601 format with timezone.
+
+    Output format: YYYY-MM-DDTHH:MM:SS+HH:MM (e.g., "2025-05-01T23:59:59+08:00")
+    Compatible with Milvus TIMESTAMPTZ field type (Milvus 2.6.6+).
+
+    Args:
+        count: Number of timestamps to generate
+        start_year: Start year (inclusive)
+        end_year: End year (inclusive)
+        timezone_offset_hours: Fixed timezone offset in hours (e.g., 8 for +08:00, -5 for -05:00).
+                               If None, generates random offsets from common timezones.
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of TIMESTAMPTZ strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_timestamptz_strings(
+            count, start_year, end_year, timezone_offset_hours, seed
+        )
+
+    # Python fallback using datetime
+    import random
+    from datetime import datetime, timedelta, timezone
+
+    if seed is not None:
+        random.seed(seed)
+
+    tz_offsets = [
+        -12,
+        -11,
+        -10,
+        -9,
+        -8,
+        -7,
+        -6,
+        -5,
+        -4,
+        -3,
+        0,
+        1,
+        2,
+        3,
+        5,
+        8,
+        9,
+        10,
+        12,
+    ]
+    timestamps = []
+    for _ in range(count):
+        year = random.randint(start_year, end_year)
+        month = random.randint(1, 12)
+        day = random.randint(1, 28)
+        hour = random.randint(0, 23)
+        minute = random.randint(0, 59)
+        second = random.randint(0, 59)
+        offset_hours = (
+            timezone_offset_hours
+            if timezone_offset_hours is not None
+            else random.choice(tz_offsets)
+        )
+        tz = timezone(timedelta(hours=offset_hours))
+        dt = datetime(year, month, day, hour, minute, second, tzinfo=tz)
+        timestamps.append(
+            dt.strftime("%Y-%m-%dT%H:%M:%S%z")[:22] + ":" + dt.strftime("%z")[3:]
+        )
+    return timestamps
+
+
 def generate_sequential_ids(
     count: int,
     prefix: str = "id",
@@ -667,6 +744,221 @@ def generate_sequential_ids(
 
     # Python fallback
     return [f"{prefix}_{start_index + i}" for i in range(count)]
+
+
+# =============================================================================
+# Geometry (WKT) Generation Functions
+# =============================================================================
+
+
+def generate_wkt_points(
+    count: int,
+    lon_min: float = -180.0,
+    lon_max: float = 180.0,
+    lat_min: float = -90.0,
+    lat_max: float = 90.0,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate WKT POINT strings.
+
+    Output format: POINT (longitude latitude)
+    Compatible with Milvus GEOMETRY field type (Milvus 2.6.4+).
+
+    Args:
+        count: Number of points to generate
+        lon_min: Minimum longitude (-180 to 180)
+        lon_max: Maximum longitude
+        lat_min: Minimum latitude (-90 to 90)
+        lat_max: Maximum latitude
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of WKT POINT strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_wkt_points(
+            count, lon_min, lon_max, lat_min, lat_max, seed
+        )
+
+    # Python fallback
+    import random
+
+    if seed is not None:
+        random.seed(seed)
+    return [
+        f"POINT ({random.uniform(lon_min, lon_max):.6f} {random.uniform(lat_min, lat_max):.6f})"
+        for _ in range(count)
+    ]
+
+
+def generate_wkt_linestrings(
+    count: int,
+    points_min: int = 2,
+    points_max: int = 5,
+    lon_min: float = -180.0,
+    lon_max: float = 180.0,
+    lat_min: float = -90.0,
+    lat_max: float = 90.0,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate WKT LINESTRING strings.
+
+    Output format: LINESTRING (x1 y1, x2 y2, ...)
+    Compatible with Milvus GEOMETRY field type (Milvus 2.6.4+).
+
+    Args:
+        count: Number of linestrings to generate
+        points_min: Minimum number of points per linestring
+        points_max: Maximum number of points per linestring
+        lon_min: Minimum longitude
+        lon_max: Maximum longitude
+        lat_min: Minimum latitude
+        lat_max: Maximum latitude
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of WKT LINESTRING strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_wkt_linestrings(
+            count, points_min, points_max, lon_min, lon_max, lat_min, lat_max, seed
+        )
+
+    # Python fallback
+    import random
+
+    if seed is not None:
+        random.seed(seed)
+    result = []
+    for _ in range(count):
+        num_points = random.randint(max(2, points_min), points_max)
+        points = [
+            f"{random.uniform(lon_min, lon_max):.6f} {random.uniform(lat_min, lat_max):.6f}"
+            for _ in range(num_points)
+        ]
+        result.append(f"LINESTRING ({', '.join(points)})")
+    return result
+
+
+def generate_wkt_polygons(
+    count: int,
+    vertices_min: int = 4,
+    vertices_max: int = 8,
+    center_lon: float = 0.0,
+    center_lat: float = 0.0,
+    radius: float = 1.0,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate WKT POLYGON strings.
+
+    Output format: POLYGON ((x1 y1, x2 y2, ..., x1 y1))
+    Generates simple convex polygons (no holes).
+    Compatible with Milvus GEOMETRY field type (Milvus 2.6.4+).
+
+    Args:
+        count: Number of polygons to generate
+        vertices_min: Minimum number of vertices (3+)
+        vertices_max: Maximum number of vertices
+        center_lon: Center longitude for polygon generation
+        center_lat: Center latitude for polygon generation
+        radius: Approximate radius in degrees
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of WKT POLYGON strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_wkt_polygons(
+            count, vertices_min, vertices_max, center_lon, center_lat, radius, seed
+        )
+
+    # Python fallback
+    import math
+    import random
+
+    if seed is not None:
+        random.seed(seed)
+    result = []
+    for _ in range(count):
+        num_vertices = random.randint(max(3, vertices_min), vertices_max)
+        cx = center_lon + random.uniform(-radius, radius)
+        cy = center_lat + random.uniform(-radius, radius)
+        angles = sorted([random.uniform(0, 2 * math.pi) for _ in range(num_vertices)])
+        points = []
+        for angle in angles:
+            r = radius * (0.5 + random.uniform(0, 0.5))
+            lon = cx + r * math.cos(angle)
+            lat = cy + r * math.sin(angle)
+            points.append(f"{lon:.6f} {lat:.6f}")
+        points.append(points[0])  # Close the ring
+        result.append(f"POLYGON (({', '.join(points)}))")
+    return result
+
+
+def generate_wkt_geometries(
+    count: int,
+    geometry_type: str = "point",
+    lon_min: float = -180.0,
+    lon_max: float = 180.0,
+    lat_min: float = -90.0,
+    lat_max: float = 90.0,
+    seed: int | None = None,
+) -> list[str]:
+    """Generate WKT geometry strings of specified type.
+
+    Generates POINT, LINESTRING, POLYGON, or mixed geometries.
+    Compatible with Milvus GEOMETRY field type (Milvus 2.6.4+).
+
+    Args:
+        count: Number of geometries to generate
+        geometry_type: Type of geometry ("point", "linestring", "polygon", "mixed")
+        lon_min: Minimum longitude
+        lon_max: Maximum longitude
+        lat_min: Minimum latitude
+        lat_max: Maximum latitude
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of WKT geometry strings
+    """
+    if _rust_module is not None:
+        return _rust_module.generate_wkt_geometries(
+            count, geometry_type, lon_min, lon_max, lat_min, lat_max, seed
+        )
+
+    # Python fallback
+    geom_type = geometry_type.lower()
+    if geom_type == "point":
+        return generate_wkt_points(count, lon_min, lon_max, lat_min, lat_max, seed)
+    elif geom_type == "linestring":
+        return generate_wkt_linestrings(
+            count, 2, 5, lon_min, lon_max, lat_min, lat_max, seed
+        )
+    elif geom_type == "polygon":
+        cx = (lon_min + lon_max) / 2
+        cy = (lat_min + lat_max) / 2
+        radius = min(lon_max - lon_min, lat_max - lat_min) * 0.1
+        return generate_wkt_polygons(count, 4, 8, cx, cy, radius, seed)
+    else:  # mixed
+        import random
+
+        if seed is not None:
+            random.seed(seed)
+        result = []
+        for _ in range(count):
+            t = random.choice(["point", "linestring", "polygon"])
+            if t == "point":
+                result.extend(generate_wkt_points(1, lon_min, lon_max, lat_min, lat_max))
+            elif t == "linestring":
+                result.extend(
+                    generate_wkt_linestrings(1, 2, 5, lon_min, lon_max, lat_min, lat_max)
+                )
+            else:
+                cx = (lon_min + lon_max) / 2
+                cy = (lat_min + lat_max) / 2
+                radius = min(lon_max - lon_min, lat_max - lat_min) * 0.1
+                result.extend(generate_wkt_polygons(1, 4, 6, cx, cy, radius))
+        return result
 
 
 def list_faker_types() -> list[str]:
@@ -728,11 +1020,28 @@ def generate_lorem_words(
 
     # Python fallback - simple lorem vocabulary
     lorem_words = [
-        "lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
-        "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
-        "incididunt", "ut", "labore", "et", "dolore", "magna", "aliqua",
+        "lorem",
+        "ipsum",
+        "dolor",
+        "sit",
+        "amet",
+        "consectetur",
+        "adipiscing",
+        "elit",
+        "sed",
+        "do",
+        "eiusmod",
+        "tempor",
+        "incididunt",
+        "ut",
+        "labore",
+        "et",
+        "dolore",
+        "magna",
+        "aliqua",
     ]
     import random
+
     if seed is not None:
         random.seed(seed)
     result = []
@@ -766,11 +1075,22 @@ def generate_lorem_sentences(
 
     # Python fallback
     import random
+
     if seed is not None:
         random.seed(seed)
     lorem_words = [
-        "lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
-        "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
+        "lorem",
+        "ipsum",
+        "dolor",
+        "sit",
+        "amet",
+        "consectetur",
+        "adipiscing",
+        "elit",
+        "sed",
+        "do",
+        "eiusmod",
+        "tempor",
     ]
     result = []
     for _ in range(count):
@@ -805,6 +1125,7 @@ def generate_lorem_paragraphs(
 
     # Python fallback
     import random
+
     if seed is not None:
         random.seed(seed)
     result = []

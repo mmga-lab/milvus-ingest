@@ -548,6 +548,59 @@ class TestDateGeneration:
             assert len(time_part.split(":")) == 3
 
 
+class TestTimestamptz:
+    """Test TIMESTAMPTZ generation for Milvus 2.6.6+."""
+
+    def test_timestamptz_basic(self):
+        """Test basic TIMESTAMPTZ generation."""
+        from milvus_ingest.rust_backend import generate_timestamptz_strings
+
+        result = generate_timestamptz_strings(100, start_year=2024, end_year=2025, seed=42)
+        assert len(result) == 100
+        for ts in result:
+            # Format: YYYY-MM-DDTHH:MM:SS+HH:MM or YYYY-MM-DDTHH:MM:SS-HH:MM
+            assert "T" in ts
+            assert ("+" in ts or ts.count("-") >= 3)  # Has timezone offset
+            # Check format with regex
+            import re
+            pattern = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}"
+            assert re.match(pattern, ts), f"Invalid TIMESTAMPTZ format: {ts}"
+
+    def test_timestamptz_fixed_timezone(self):
+        """Test TIMESTAMPTZ with fixed timezone."""
+        from milvus_ingest.rust_backend import generate_timestamptz_strings
+
+        # Test Beijing time (+08:00)
+        result = generate_timestamptz_strings(100, timezone_offset_hours=8, seed=42)
+        assert len(result) == 100
+        for ts in result:
+            assert "+08:00" in ts, f"Expected +08:00 timezone: {ts}"
+
+        # Test US Eastern time (-05:00)
+        result = generate_timestamptz_strings(100, timezone_offset_hours=-5, seed=42)
+        for ts in result:
+            assert "-05:00" in ts, f"Expected -05:00 timezone: {ts}"
+
+    def test_timestamptz_utc(self):
+        """Test TIMESTAMPTZ with UTC timezone."""
+        from milvus_ingest.rust_backend import generate_timestamptz_strings
+
+        result = generate_timestamptz_strings(100, timezone_offset_hours=0, seed=42)
+        for ts in result:
+            assert "+00:00" in ts, f"Expected +00:00 UTC timezone: {ts}"
+
+    def test_timestamptz_reproducibility(self):
+        """Test TIMESTAMPTZ reproducibility with seed."""
+        from milvus_ingest.rust_backend import generate_timestamptz_strings
+
+        result1 = generate_timestamptz_strings(100, seed=12345)
+        result2 = generate_timestamptz_strings(100, seed=12345)
+        result3 = generate_timestamptz_strings(100, seed=99999)
+
+        assert result1 == result2
+        assert result1 != result3
+
+
 class TestSequentialIds:
     """Test sequential ID generation."""
 
@@ -568,6 +621,81 @@ class TestSequentialIds:
         assert len(result) == 100
         assert result[0] == "item_1000"
         assert result[99] == "item_1099"
+
+
+class TestWktGeometry:
+    """Test WKT geometry generation for Milvus 2.6.4+."""
+
+    def test_wkt_points(self):
+        """Test WKT POINT generation."""
+        from milvus_ingest.rust_backend import generate_wkt_points
+
+        result = generate_wkt_points(100, seed=42)
+        assert len(result) == 100
+        for p in result:
+            assert p.startswith("POINT (")
+            assert p.endswith(")")
+
+    def test_wkt_points_bounds(self):
+        """Test WKT POINT with geographic bounds."""
+        from milvus_ingest.rust_backend import generate_wkt_points
+
+        # Beijing area
+        result = generate_wkt_points(
+            100, lon_min=116.0, lon_max=117.0, lat_min=39.5, lat_max=40.5, seed=42
+        )
+        assert len(result) == 100
+        for p in result:
+            # Extract coordinates
+            coords = p[7:-1].split()  # Remove "POINT (" and ")"
+            lon, lat = float(coords[0]), float(coords[1])
+            assert 116.0 <= lon <= 117.0
+            assert 39.5 <= lat <= 40.5
+
+    def test_wkt_linestrings(self):
+        """Test WKT LINESTRING generation."""
+        from milvus_ingest.rust_backend import generate_wkt_linestrings
+
+        result = generate_wkt_linestrings(50, points_min=3, points_max=5, seed=42)
+        assert len(result) == 50
+        for line in result:
+            assert line.startswith("LINESTRING (")
+            assert line.endswith(")")
+            # Count comma-separated points
+            coords = line[12:-1]  # Remove "LINESTRING (" and ")"
+            points = coords.split(", ")
+            assert 3 <= len(points) <= 5
+
+    def test_wkt_polygons(self):
+        """Test WKT POLYGON generation."""
+        from milvus_ingest.rust_backend import generate_wkt_polygons
+
+        result = generate_wkt_polygons(50, vertices_min=4, vertices_max=6, seed=42)
+        assert len(result) == 50
+        for poly in result:
+            assert poly.startswith("POLYGON ((")
+            assert poly.endswith("))")
+            # Polygon should be closed (first point == last point)
+            coords = poly[10:-2]  # Remove "POLYGON ((" and "))"
+            points = coords.split(", ")
+            assert points[0] == points[-1]  # Closed ring
+
+    def test_wkt_geometries_mixed(self):
+        """Test mixed WKT geometry generation."""
+        from milvus_ingest.rust_backend import generate_wkt_geometries
+
+        result = generate_wkt_geometries(100, geometry_type="mixed", seed=42)
+        assert len(result) == 100
+        types_found = {"POINT": False, "LINESTRING": False, "POLYGON": False}
+        for geom in result:
+            if geom.startswith("POINT"):
+                types_found["POINT"] = True
+            elif geom.startswith("LINESTRING"):
+                types_found["LINESTRING"] = True
+            elif geom.startswith("POLYGON"):
+                types_found["POLYGON"] = True
+        # Should have at least 2 different types in 100 items
+        assert sum(types_found.values()) >= 2
 
 
 @pytest.mark.slow
